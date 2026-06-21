@@ -1,0 +1,157 @@
+# requirements.txt
+#
+# WHY PIN EXACT VERSIONS:
+# "fastapi" without a version means pip installs the latest.
+# If FastAPI releases a breaking change tomorrow, your deployment breaks.
+# Pinning versions means your app behaves identically on every machine —
+# your laptop, your teammate's laptop, your EC2 server, your Docker container.
+#
+# HOW TO UPDATE SAFELY:
+# 1. Change the version number here
+# 2. Run: pip install -r requirements.txt
+# 3. Run your tests
+# 4. If tests pass, the update is safe to deploy
+#
+# GROUPS EXPLAINED:
+# Each group is labelled by what it does in Pillara.
+# If you remove a feature, you know exactly which packages to remove.
+
+# ─── WEB FRAMEWORK ────────────────────────────────────────────────────────────
+fastapi==0.115.5                # async web framework — the backbone of the API
+uvicorn[standard]==0.32.1       # ASGI server that runs FastAPI
+                                # [standard] includes uvloop (faster event loop)
+                                # and websockets support
+python-multipart==0.0.12        # required for file uploads (audio voice input)
+httpx==0.27.2                   # async HTTP client for calling external APIs
+                                # (FDA API, LLM providers)
+
+# ─── DATA VALIDATION ──────────────────────────────────────────────────────────
+pydantic==2.10.2                # data validation — first line of defense
+pydantic-settings==2.6.1        # reads settings from environment variables
+email-validator==2.2.0          # validates email addresses (required by Pydantic's EmailStr)
+
+# ─── DATABASE ─────────────────────────────────────────────────────────────────
+sqlalchemy==2.0.36              # ORM — defines tables as Python classes
+asyncpg==0.30.0                 # async PostgreSQL driver (faster than psycopg2 for async)
+alembic==1.14.0                 # database migrations — tracks schema changes safely
+greenlet==3.1.1                 # required by SQLAlchemy async
+
+# ─── REDIS ────────────────────────────────────────────────────────────────────
+redis[hiredis]==5.2.0           # async Redis client
+                                # [hiredis] = C extension for faster parsing
+arq==0.26.1                     # async Redis Queue for background jobs (reminders)
+
+# ─── SECURITY ─────────────────────────────────────────────────────────────────
+passlib[bcrypt]==1.7.4          # password hashing — bcrypt algorithm
+                                # [bcrypt] installs the bcrypt C extension
+bcrypt==4.0.1                   # PINNED: passlib 1.7.4 reads bcrypt.__about__.__version__
+                                # to detect the backend. bcrypt 4.1.1+ removed that
+                                # attribute, which makes passlib's version detection
+                                # silently fail and fall back to a buggy code path that
+                                # doesn't truncate passwords to bcrypt's 72-byte limit —
+                                # causing "password cannot be longer than 72 bytes" even
+                                # for short passwords. passlib is largely unmaintained,
+                                # so the practical fix is pinning bcrypt to the last
+                                # version known to still expose __about__.
+pyjwt==2.10.0                   # JWT token creation and verification
+cryptography==43.0.3            # required by PyJWT for some algorithms
+python-jose==3.3.0              # alternative JWT library (backup)
+
+# ─── AI — LLM PROVIDERS ───────────────────────────────────────────────────────
+groq==0.12.0                    # Groq API client — Provider 1 (primary, fastest)
+openai==1.54.4                  # OpenAI-compatible client
+                                # WHY OPENAI CLIENT FOR MULTIPLE PROVIDERS:
+                                # Cerebras, Together AI, OpenRouter all implement
+                                # the OpenAI API spec. One client library,
+                                # five providers — just change the base_url.
+anthropic==0.39.0               # Anthropic client (optional fallback)
+
+# ─── AI — SPEECH ──────────────────────────────────────────────────────────────
+openai-whisper==20240930        # Whisper STT — runs locally, free forever
+                                # Transcribes voice input to text
+TTS==0.22.0                     # Coqui TTS — runs locally, free forever
+                                # Converts AI text responses to speech
+# IMPORTANT — INSTALL CPU-ONLY TORCH FIRST, BEFORE running pip install -r requirements.txt:
+#   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+# WHY: the default torch package on PyPI bundles CUDA (GPU) binaries, adding
+# 2-4GB for hardware this project doesn't use locally. Installing the CPU-only
+# build first means the line below is satisfied without pip pulling the GPU version.
+# If you skip this step, `pip install -r requirements.txt` still works — it just
+# downloads the much larger GPU build instead.
+torch==2.5.1                    # PyTorch — required by Whisper and Coqui TTS
+torchaudio==2.5.1               # audio processing for PyTorch
+
+# ─── AI — EMBEDDINGS & RAG ────────────────────────────────────────────────────
+fastembed==0.4.1                # fast local embeddings — no API calls, no PHI sent out
+                                # WHY fastembed OVER sentence-transformers:
+                                # fastembed is 2-3x faster with similar quality
+                                # Optimised for production use
+chromadb==0.5.20                # vector database for drug knowledge base
+rank-bm25==0.2.2                # BM25 keyword search algorithm
+                                # Used in hybrid retrieval alongside vector search
+sentence-transformers==3.3.1    # cross-encoder re-ranking model
+                                # Scores retrieved chunks for final re-ranking
+
+# ─── PDF GENERATION ───────────────────────────────────────────────────────────
+weasyprint==62.3                # HTML to PDF — generates medication reports
+jinja2==3.1.4                   # HTML templating for PDF reports
+                                # WHY JINJA2: build the report as HTML first,
+                                # then WeasyPrint converts to PDF
+
+# ─── MONITORING & LOGGING ─────────────────────────────────────────────────────
+structlog==24.4.0               # structured JSON logging — HIPAA-safe
+sentry-sdk[fastapi]==2.18.0     # error tracking + performance monitoring
+                                # [fastapi] includes FastAPI integration
+prometheus-client==0.21.0       # exposes /metrics endpoint for Prometheus
+opentelemetry-api==1.28.1       # distributed tracing standard
+opentelemetry-sdk==1.28.1
+opentelemetry-instrumentation-fastapi==0.49b1
+opentelemetry-exporter-otlp==1.28.1
+
+# ─── NOTIFICATIONS ────────────────────────────────────────────────────────────
+resend==2.4.0                   # email sending — verification, reminders
+pywebpush==2.0.1                # Web Push notifications for browser reminders
+
+# ─── SECRETS MANAGEMENT ───────────────────────────────────────────────────────
+infisicalsdk==1.0.16            # open source secrets manager client
+                                 # WHY infisicalsdk NOT infisical-sdk:
+                                 # the hyphenated name "infisical-sdk" does not exist
+                                 # on PyPI — this is the correct, real package name.
+                                 # Replaces .env in production — secrets fetched
+                                 # at startup via authenticated API call, never
+                                 # stored in plaintext on the server's disk.
+
+# ─── UTILITIES ────────────────────────────────────────────────────────────────
+python-dotenv==1.0.1            # reads .env file in development
+                                # NOT used in production (Infisical instead)
+tenacity==9.0.0                 # retry logic with exponential backoff
+                                # Used in LLM fallback chain and external API calls
+anyio==4.6.2                    # async utilities
+orjson==3.10.11                 # faster JSON serialisation than stdlib json
+                                # Important for API response speed
+python-dateutil==2.9.0          # better date parsing than stdlib datetime
+pytz==2024.2                    # timezone handling for reminder scheduling
+# zoneinfo: NOT a pip package — it's part of Python's standard library
+# since Python 3.9. Already available automatically, nothing to install.
+# Listed here only as documentation that Pillara uses it for timezone handling.
+# uuid: NOT a pip package — it's part of Python's standard library.
+# Already available automatically, nothing to install.
+
+# ─── TESTING ──────────────────────────────────────────────────────────────────
+pytest==8.3.3                   # test framework
+pytest-asyncio==0.24.0          # tests async FastAPI code
+pytest-cov==6.0.0               # measures test coverage
+factory-boy==3.3.1              # generates fake test data (users, medications)
+faker==33.0.0                   # generates realistic fake data for tests
+httpx==0.27.2                   # already listed above — also used as test client
+
+# ─── CODE QUALITY ─────────────────────────────────────────────────────────────
+black==24.10.0                  # auto-formats Python code
+ruff==0.7.4                     # fast Python linter — catches errors before runtime
+mypy==1.13.0                    # static type checker
+
+# ─── WINDOWS-SPECIFIC ─────────────────────────────────────────────────────────
+# These packages ensure Pillara works on your Windows VSCode setup
+colorama==0.4.6                 # coloured terminal output on Windows
+pywin32==308; sys_platform=="win32"  # Windows-specific utilities
+                                     # sys_platform condition = only installs on Windows

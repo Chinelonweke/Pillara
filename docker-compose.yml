@@ -1,0 +1,190 @@
+# docker-compose.yml
+#
+# WHY DOCKER COMPOSE FOR DEVELOPMENT:
+# Pillara needs three services to run: PostgreSQL, Redis, ChromaDB.
+# Without Docker Compose, you'd install all three natively on Windows,
+# deal with different installation paths, config files, and service management.
+# With Docker Compose, one command starts everything:
+#   docker-compose up -d
+# One command stops everything:
+#   docker-compose down
+#
+# WHY NOT RUN FASTAPI IN DOCKER DURING DEVELOPMENT:
+# We run FastAPI directly on your machine (uvicorn main:app --reload)
+# so VSCode's debugger, hot reload, and IntelliSense work properly.
+# Only the INFRASTRUCTURE (Postgres, Redis, ChromaDB) runs in Docker.
+#
+# IN PRODUCTION:
+# Everything including FastAPI runs in Docker.
+# The Dockerfile handles that — this file is development only.
+
+services:
+
+  # ─── POSTGRESQL ─────────────────────────────────────────────────────────────
+  postgres:
+    image: pgvector/pgvector:pg16
+    # WHY pgvector/pgvector instead of plain postgres:
+    # This image includes the pgvector extension pre-installed.
+    # pgvector adds vector similarity search to PostgreSQL.
+    # We use it for user-specific vector data (medication embeddings).
+    # Plain postgres would require manual extension installation.
+
+    container_name: pillara_postgres
+
+    environment:
+      # These match the DATABASE_URL in your .env.example
+      POSTGRES_USER: pillara_user
+      POSTGRES_PASSWORD: pillara_pass
+      POSTGRES_DB: pillara_db
+
+    ports:
+      - "5432:5432"
+      # Format: "host_port:container_port"
+      # Your FastAPI app connects to localhost:5432
+      # Docker routes it to the container's port 5432
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # WHY A NAMED VOLUME:
+      # Without this, your database is deleted every time you
+      # run "docker-compose down". Named volumes persist across restarts.
+      # postgres_data is defined at the bottom of this file.
+      - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/init.sql
+      # This SQL file runs automatically when the container first starts.
+      # It creates the pgvector extension and any initial setup.
+
+    healthcheck:
+      # WHY HEALTHCHECK:
+      # Other services that depend on Postgres (like FastAPI) should
+      # wait until Postgres is actually ready to accept connections —
+      # not just wait until the container has started.
+      # pg_isready checks if Postgres is accepting connections.
+      test: ["CMD-SHELL", "pg_isready -U pillara_user -d pillara_db"]
+      interval: 10s      # check every 10 seconds
+      timeout: 5s        # give up after 5 seconds if no response
+      retries: 5         # try 5 times before marking as unhealthy
+      start_period: 30s  # wait 30 seconds before first check (startup time)
+
+    restart: unless-stopped
+    # WHY unless-stopped: if Docker restarts (system reboot), Postgres
+    # automatically restarts too. "unless-stopped" means: restart always
+    # EXCEPT when we manually stopped it with docker-compose down.
+
+  # ─── REDIS ──────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7.4-alpine
+    # WHY alpine: smaller image (~30MB vs ~100MB for full Redis)
+    # Alpine is a minimal Linux distribution — less attack surface,
+    # faster to download, same Redis functionality
+
+    container_name: pillara_redis
+
+    ports:
+      - "6380:6379"
+      # WHY 6380 (not the default 6379):
+      # Port 6379 may already be in use by another project on this machine.
+      # Pillara's Redis listens on 6380 on the host, 6379 inside the container.
+      # The app connects via REDIS_URL=redis://localhost:6380 — update this
+      # in Infisical / your .env if you previously set 6379.
+
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    # COMMAND EXPLAINED:
+    # --appendonly yes: persist Redis data to disk (AOF persistence)
+    #   Without this, all cached data and sessions are lost on restart.
+    # --appendfsync everysec: flush to disk every second
+    #   Balance between durability and performance.
+    # --maxmemory 256mb: maximum memory Redis can use
+    #   Prevents Redis from eating all available RAM.
+    # --maxmemory-policy allkeys-lru: when memory is full,
+    #   evict the Least Recently Used keys first.
+    #   LRU = good eviction policy for cache data.
+
+    volumes:
+      - redis_data:/data
+      # Persists Redis data across restarts
+
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+    restart: unless-stopped
+
+  # ─── CHROMADB ───────────────────────────────────────────────────────────────
+  chromadb:
+    image: chromadb/chroma:0.5.20
+    container_name: pillara_chromadb
+
+    ports:
+      - "8001:8000"
+      # ChromaDB runs on 8000 inside the container
+      # We expose it as 8001 on the host to avoid conflicts
+      # (your FastAPI might also use 8000)
+
+    volumes:
+      - chromadb_data:/chroma/chroma
+      # Persists the vector database (drug knowledge embeddings)
+      # Without this, you'd re-embed all drug documents every restart
+
+    environment:
+      IS_PERSISTENT: "TRUE"
+      ANONYMIZED_TELEMETRY: "FALSE"
+      # WHY DISABLE TELEMETRY:
+      # ChromaDB sends usage data to their servers by default.
+      # For a HIPAA-conscious app, we disable all external telemetry.
+      # Even if the data is anonymous, we control what leaves our server.
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    restart: unless-stopped
+
+  # ─── PGADMIN (OPTIONAL — DATABASE UI) ───────────────────────────────────────
+  # Uncomment this if you want a visual interface for PostgreSQL
+  # Access at: http://localhost:5050
+  # Login: admin@pillara.dev / admin
+
+  # pgadmin:
+  #   image: dpage/pgadmin4:latest
+  #   container_name: pillara_pgadmin
+  #   environment:
+  #     PGADMIN_DEFAULT_EMAIL: admin@pillara.dev
+  #     PGADMIN_DEFAULT_PASSWORD: admin
+  #   ports:
+  #     - "5050:80"
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #   restart: unless-stopped
+
+# ─── NAMED VOLUMES ────────────────────────────────────────────────────────────
+# WHY NAMED VOLUMES (not bind mounts):
+# Bind mounts link a host directory to a container directory.
+# Named volumes are managed by Docker — more portable, better performance
+# on Windows (no symlink issues), and survive docker-compose down.
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  chromadb_data:
+    driver: local
+
+# ─── NETWORKS ─────────────────────────────────────────────────────────────────
+# WHY A CUSTOM NETWORK:
+# By default, Docker Compose creates a network where all services can
+# talk to each other by container name.
+# Explicit network definition makes this clear and configurable.
+networks:
+  default:
+    name: pillara_network

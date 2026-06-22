@@ -10,17 +10,27 @@ from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from api.middleware import RequestContextMiddleware, SecurityHeadersMiddleware
 from core.config import settings
 from core.database import close_database, init_database, init_chromadb_with_retry
 from core.exceptions import PillaraError, RateLimitError
 from core.redis_client import close_redis, init_redis
 from core.security import production_safety_check
 from monitoring.logger import configure_logging, get_logger
+from monitoring.sentry_setup import init_sentry
 from schemas.all_schemas import ErrorResponse, HealthCheckResponse
 
 configure_logging()
 logger = get_logger(__name__)
+
+# WHY SENTRY INITIALIZES HERE (module level, before lifespan):
+# Sentry must be active before ANYTHING else runs — including the lifespan
+# startup sequence. If the database connection fails at startup, or if an
+# import error occurs in a router, Sentry needs to already be initialized
+# to capture it. Initializing inside lifespan would mean startup errors
+# before that line are invisible to Sentry entirely.
+# init_sentry() is a no-op if SENTRY_DSN is not configured, so this is
+# always safe to call unconditionally.
+init_sentry()
 
 
 @asynccontextmanager
@@ -61,6 +71,8 @@ app = FastAPI(
     openapi_url="/openapi.json" if settings.ENVIRONMENT == "development" else None,
     lifespan=lifespan,
 )
+
+from api.middleware import RequestContextMiddleware, SecurityHeadersMiddleware
 
 # WHY THESE TWO MIDDLEWARES, AND WHY THIS ORDER:
 # Starlette middleware runs as a stack — the LAST one added runs FIRST on

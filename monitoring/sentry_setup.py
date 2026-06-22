@@ -39,11 +39,45 @@ def init_sentry() -> None:
     logger.info("sentry_initialized", environment=settings.ENVIRONMENT)
 
 
-def _scrub_phi_from_event(event: dict, hint: dict) -> dict:
+def _scrub_phi_from_event(event: dict, hint: dict) -> dict | None:
     """
-    Removes PHI from Sentry events before they're sent.
-    Mirrors the PHI_FIELD_NAMES scrubbing logic in monitoring/logger.py.
+    Runs before every event is sent to Sentry. Two jobs:
+
+    1. FILTER known third-party noise — returns None to drop the event
+       entirely, so it never reaches Sentry and never pollutes the feed.
+
+    2. SCRUB PHI — removes patient-identifiable fields from request bodies,
+       local variables, and stack trace context before the event leaves
+       our server. Mirrors the PHI_FIELD_NAMES scrubbing in logger.py.
+
+    WHY FILTER HERE (not ignore_errors=[TypeError]):
+    ignore_errors suppresses ALL TypeErrors, including real ones in our
+    own code that we genuinely need to see. Filtering in before_send
+    lets us be surgical — we check the specific error message and logger
+    name, so only this exact third-party noise is dropped, nothing else.
     """
+    # ── Filter ChromaDB telemetry noise ────────────────────────────────────────
+    # ChromaDB's internal telemetry client has a known bug: it calls
+    # capture() with the wrong number of arguments, producing:
+    # "Failed to send telemetry event ClientStartEvent: capture() takes
+    # 1 positional argument but 3 were given"
+    # This is a third-party library bug we cannot fix. It has zero impact
+    # on Pillara's functionality. Dropping it here keeps the Issues feed
+    # clean so real errors are immediately visible.
+    exc_info = hint.get("exc_info")
+    if exc_info:
+        exc_type, exc_value, _ = exc_info
+        if (
+            exc_type is TypeError
+            and "capture() takes 1 positional argument" in str(exc_value)
+        ):
+            return None  # Drop this event entirely — never reaches Sentry
+
+    # Also filter by logger name as a secondary check
+    logger_name = event.get("logger", "")
+    if "chromadb.telemetry" in logger_name:
+        return None
+
     from monitoring.logger import PHI_FIELD_NAMES
 
     def scrub_dict(d: dict) -> dict:

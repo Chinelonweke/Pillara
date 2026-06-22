@@ -105,6 +105,22 @@ class Settings(BaseSettings):
     FDA_API_BASE_URL: str = "https://api.fda.gov/drug"
     FDA_API_TIMEOUT: int = 10
 
+    # ── DRUG TAXONOMY APIs (RxNorm + MedRT) ────────────────────────────────────
+    # WHY TWO SEPARATE APIs:
+    # RxNorm: authoritative for drug naming and class taxonomy
+    #   → answers "what class does this drug belong to?"
+    # MedRT (formerly NDF-RT): specifically designed for pharmacological
+    #   properties and allergy cross-sensitivity
+    #   → answers "is this drug class cross-reactive with this allergy?"
+    # Together they give clinical-grade allergy checking without requiring
+    # a commercial drug database license.
+    # Both are free, government-maintained, no API key required.
+    RXNORM_API_BASE_URL: str = "https://rxnav.nlm.nih.gov/REST"
+    RXNORM_API_TIMEOUT: int = 5   # fast lookup, fail quickly if slow
+    # WHY 5s TIMEOUT: drug class lookups should be fast. If NLM is slow,
+    # we fall back to the local map rather than make the user wait.
+    # The local map is the fast path; RxNorm is the authoritative fallback.
+
     # ── RATE LIMITING ─────────────────────────────────────────────────────────
     RATE_LIMIT_PER_MINUTE: int = 60
     RATE_LIMIT_PER_HOUR: int = 1000

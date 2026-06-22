@@ -289,10 +289,39 @@ class InteractionResult(BaseModel):
     source: Optional[str] = None  # where this information came from
 
 
+class AllergyWarning(BaseModel):
+    """
+    A deterministic allergy cross-reactivity warning.
+
+    WHY SEPARATE FROM InteractionResult:
+    Drug-drug interactions are probabilistic — severity varies, context
+    matters, the LLM/RAG pipeline is the right tool. Allergy cross-
+    reactivity warnings for known drug classes are deterministic — if a
+    patient has a documented Penicillin allergy and is checking amoxicillin
+    (a penicillin-class antibiotic), this is always a high-severity warning,
+    with no LLM judgment required. Keeping these separate in the response
+    means clients can always trust that allergy_warnings are structurally
+    reliable, not probabilistic, and can render them differently (e.g.
+    always show a red banner, regardless of overall_risk).
+    """
+    drug_name: str           # the drug being checked
+    allergen: str            # the documented allergy it conflicts with
+    severity: str            # always "high" for known cross-reactivity
+    description: str         # plain language explanation
+    action_required: str     # what the user should do
+
+
 class InteractionCheckResponse(BaseModel):
     """Complete response from an interaction check."""
     drugs_checked: list[str]
     interactions_found: list[InteractionResult]
+    allergy_warnings: list[AllergyWarning] = []
+    # WHY DEFAULT EMPTY LIST (not Optional):
+    # The frontend should always be able to iterate allergy_warnings without
+    # null-checking — an empty list is unambiguous ("no warnings found"),
+    # while None could mean "not checked" vs "checked and found nothing."
+    # For a safety feature, that distinction matters: clients deserve to know
+    # the check ran and found nothing, not just that no data was returned.
     overall_risk: str             # "high", "moderate", "low", "none"
     summary: str                  # one-sentence summary for the user
     disclaimer: str

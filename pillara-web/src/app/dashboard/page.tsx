@@ -3,7 +3,22 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/lib/auth-context'
-import { profiles, medications, interactions, Profile, Medication, InteractionCheckResponse, APIError } from '@/lib/api'
+import { profiles, medications, interactions, ai, Profile, Medication, InteractionCheckResponse, APIError } from '@/lib/api'
+
+// Strip markdown symbols from LLM-generated text before display.
+// WHY: LLMs occasionally ignore plain-text instructions and generate
+// markdown. In a healthcare UI, **bold** rendering as literal asterisks
+// looks unprofessional and erodes trust. This is a defensive fallback —
+// the prompt already instructs the LLM to avoid markdown.
+function stripMarkdown(text: string): string {
+  return text
+    .replace(/\*\*(.*?)\*\*/g, '$1')   // **bold** → bold
+    .replace(/\*(.*?)\*/g, '$1')        // *italic* → italic
+    .replace(/^#{1,6}\s+/gm, '')        // ## headers → plain text
+    .replace(/^[\*\-]\s+/gm, '')        // * bullet or - bullet → plain
+    .replace(/^\d+\.\s+/gm, '')         // 1. numbered list → plain
+    .trim()
+}
 
 export default function DashboardPage() {
   const { user, logout, loading: authLoading } = useAuth()
@@ -23,6 +38,13 @@ export default function DashboardPage() {
   const [checkResult, setCheckResult] = useState<InteractionCheckResponse | null>(null)
   const [checking, setChecking] = useState(false)
   const [checkError, setCheckError] = useState('')
+
+  // AI Chat
+  const [chatMessages, setChatMessages] = useState<{role: 'user' | 'assistant', content: string}[]>([])
+  const [chatInput, setChatInput] = useState('')
+  const [chatLoading, setChatLoading] = useState(false)
+  const [chatError, setChatError] = useState('')
+  const [conversationId, setConversationId] = useState<string | undefined>(undefined)
 
   // Redirect to login if not authenticated, onboarding if not completed
   useEffect(() => {
@@ -110,6 +132,48 @@ export default function DashboardPage() {
   const handleLogout = async () => {
     await logout()
     router.push('/')
+  }
+
+  const handleChatSend = async () => {
+    if (!chatInput.trim() || chatLoading) return
+
+    const userMessage = chatInput.trim()
+    setChatInput('')
+    setChatError('')
+    setChatMessages(prev => [...prev, { role: 'user', content: userMessage }])
+    setChatLoading(true)
+
+    // Scroll to bottom after adding message
+    setTimeout(() => {
+      const el = document.getElementById('chat-messages')
+      if (el) el.scrollTop = el.scrollHeight
+    }, 50)
+
+    try {
+      const result = await ai.query(
+        userMessage,
+        profile?.id,
+        conversationId,
+      )
+      setConversationId(result.conversation_id)
+      setChatMessages(prev => [...prev, { role: 'assistant', content: result.response_text }])
+
+      // Scroll to bottom after response
+      setTimeout(() => {
+        const el = document.getElementById('chat-messages')
+        if (el) el.scrollTop = el.scrollHeight
+      }, 50)
+    } catch (err) {
+      if (err instanceof APIError) {
+        setChatError(err.message)
+      } else {
+        setChatError('Failed to get a response. Please try again.')
+      }
+      // Remove the user message if the request failed
+      setChatMessages(prev => prev.slice(0, -1))
+    } finally {
+      setChatLoading(false)
+    }
   }
 
   if (authLoading || loadingData) {
@@ -315,8 +379,8 @@ export default function DashboardPage() {
 
                 {/* Summary */}
                 <div className="bg-white/5 border border-white/10 rounded-xl p-4">
-                  <p className="text-slate-300 text-xs font-medium mb-2 uppercase tracking-wide">Analysis</p>
-                  <p className="text-slate-300 text-sm leading-relaxed">{checkResult.summary}</p>
+                  <p className="text-slate-300 text-xs font-medium mb-3 uppercase tracking-wide">Analysis</p>
+                  <p className="text-slate-300 text-sm leading-7">{stripMarkdown(checkResult.summary)}</p>
                 </div>
 
                 {/* Disclaimer */}
@@ -335,6 +399,111 @@ export default function DashboardPage() {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+
+        {/* AI Chat Interface */}
+        <div className="mt-10">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-white font-semibold">Ask the medication assistant</h2>
+              <p className="text-slate-500 text-xs mt-1">
+                Ask about drug classes, adverse effects, interactions, or how medications work.
+                Grounded in verified clinical data.
+              </p>
+            </div>
+          </div>
+
+          <div className="bg-white/5 border border-white/10 rounded-xl overflow-hidden">
+            {/* Chat messages */}
+            <div className="h-80 overflow-y-auto p-4 space-y-4" id="chat-messages">
+              {chatMessages.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-center px-8">
+                  <div className="w-12 h-12 bg-[#4A9B8E]/10 border border-[#4A9B8E]/20 rounded-full flex items-center justify-center mb-4">
+                    <span className="text-[#4A9B8E] text-xl">💊</span>
+                  </div>
+                  <p className="text-slate-300 text-sm font-medium mb-2">Ask anything about medications</p>
+                  <p className="text-slate-500 text-xs leading-relaxed max-w-sm">
+                    Try: "What drug class is amoxicillin?" or "What are the side effects of ibuprofen?"
+                    or "How do ACE inhibitors work?"
+                  </p>
+                  <div className="flex flex-wrap gap-2 mt-4 justify-center">
+                    {[
+                      'What is amoxicillin used for?',
+                      'How do beta-blockers work?',
+                      'What are NSAIDs?',
+                    ].map((suggestion) => (
+                      <button
+                        key={suggestion}
+                        onClick={() => setChatInput(suggestion)}
+                        className="px-3 py-1.5 bg-white/5 border border-white/10 rounded-full text-slate-400 text-xs hover:text-white hover:border-white/30 transition-colors"
+                      >
+                        {suggestion}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                chatMessages.map((msg, i) => (
+                  <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                    {msg.role === 'assistant' && (
+                      <div className="w-7 h-7 bg-[#4A9B8E] rounded-full flex items-center justify-center mr-2 mt-0.5 flex-shrink-0">
+                        <span className="text-white text-xs font-bold">P</span>
+                      </div>
+                    )}
+                    <div className={`max-w-[75%] rounded-2xl px-4 py-3 ${
+                      msg.role === 'user'
+                        ? 'bg-[#4A9B8E] text-white rounded-tr-sm'
+                        : 'bg-white/8 border border-white/10 text-slate-300 rounded-tl-sm'
+                    }`}>
+                      <p className="text-sm leading-relaxed">{msg.role === 'assistant' ? stripMarkdown(msg.content) : msg.content}</p>
+                    </div>
+                  </div>
+                ))
+              )}
+              {chatLoading && (
+                <div className="flex justify-start">
+                  <div className="w-7 h-7 bg-[#4A9B8E] rounded-full flex items-center justify-center mr-2 flex-shrink-0">
+                    <span className="text-white text-xs font-bold">P</span>
+                  </div>
+                  <div className="bg-white/8 border border-white/10 rounded-2xl rounded-tl-sm px-4 py-3">
+                    <div className="flex gap-1">
+                      <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{animationDelay: '0ms'}} />
+                      <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{animationDelay: '150ms'}} />
+                      <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{animationDelay: '300ms'}} />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Chat input */}
+            <div className="border-t border-white/10 p-4">
+              {chatError && (
+                <p className="text-red-400 text-xs mb-3">{chatError}</p>
+              )}
+              <div className="flex gap-3">
+                <input
+                  type="text"
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleChatSend()}
+                  placeholder="Ask about a drug, class, or interaction…"
+                  disabled={chatLoading}
+                  className="flex-1 bg-white/5 border border-white/10 rounded-lg px-4 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-[#4A9B8E] focus:ring-1 focus:ring-[#4A9B8E] transition-colors text-sm disabled:opacity-50"
+                />
+                <button
+                  onClick={handleChatSend}
+                  disabled={chatLoading || !chatInput.trim()}
+                  className="bg-[#4A9B8E] hover:bg-[#3d8a7d] disabled:opacity-50 disabled:cursor-not-allowed text-white px-5 py-2.5 rounded-lg text-sm font-medium transition-colors"
+                >
+                  Send
+                </button>
+              </div>
+              <p className="text-slate-600 text-xs mt-2">
+                Responses are grounded in verified clinical data. Always confirm with your pharmacist.
+              </p>
+            </div>
           </div>
         </div>
       </main>

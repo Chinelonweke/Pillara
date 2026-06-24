@@ -79,6 +79,17 @@ export default function DashboardPage() {
     loadData()
   }, [user])
 
+  const handleDeleteMedication = async (medicationId: string) => {
+    try {
+      await medications.delete(medicationId)
+      setMeds(prev => prev.filter(m => m.id !== medicationId))
+      // Clear check results since the medication list changed
+      setCheckResult(null)
+    } catch (err) {
+      console.error('Failed to delete medication:', err)
+    }
+  }
+
   const handleAddMedication = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!profile || !newMedName.trim()) return
@@ -268,7 +279,7 @@ export default function DashboardPage() {
                 meds.map(med => (
                   <div
                     key={med.id}
-                    className="bg-white/5 border border-white/10 rounded-xl px-4 py-3 flex items-center justify-between"
+                    className="bg-white/5 border border-white/10 rounded-xl px-4 py-3 flex items-center justify-between group"
                   >
                     <div>
                       <p className="text-white text-sm font-medium capitalize">{med.name}</p>
@@ -276,7 +287,16 @@ export default function DashboardPage() {
                         <p className="text-slate-400 text-xs mt-0.5">{med.dosage}</p>
                       )}
                     </div>
-                    <div className="w-2 h-2 bg-[#4A9B8E] rounded-full" />
+                    <div className="flex items-center gap-3">
+                      <div className="w-2 h-2 bg-[#4A9B8E] rounded-full" />
+                      <button
+                        onClick={() => handleDeleteMedication(med.id)}
+                        className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-red-400 transition-all text-xs"
+                        title="Remove medication"
+                      >
+                        ✕
+                      </button>
+                    </div>
                   </div>
                 ))
               )}
@@ -456,7 +476,7 @@ export default function DashboardPage() {
                         ? 'bg-[#4A9B8E] text-white rounded-tr-sm'
                         : 'bg-white/8 border border-white/10 text-slate-300 rounded-tl-sm'
                     }`}>
-                      <p className="text-sm leading-relaxed">{msg.role === 'assistant' ? stripMarkdown(msg.content) : msg.content}</p>
+                      <p className="text-sm leading-relaxed">{stripMarkdown(msg.content)}</p>
                     </div>
                   </div>
                 ))

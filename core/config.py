@@ -159,6 +159,13 @@ class Settings(BaseSettings):
     # ── MONITORING ────────────────────────────────────────────────────────────
     SENTRY_DSN: Optional[str] = None
     SENTRY_TRACES_SAMPLE_RATE: float = 1.0
+    # WHY 1.0 FOR NOW (100% sampling):
+    # At low traffic volumes (development, early production), tracing every
+    # transaction is fine and gives you complete visibility. Once Pillara
+    # serves real users at scale, set this to 0.1-0.2 (10-20%) via
+    # Infisical to reduce Sentry quota consumption. Errors (as opposed to
+    # performance traces) are always captured at 100% regardless of this
+    # setting — this only controls performance transaction sampling.
     POSTHOG_API_KEY: Optional[str] = None
 
     # ── STORAGE ───────────────────────────────────────────────────────────────

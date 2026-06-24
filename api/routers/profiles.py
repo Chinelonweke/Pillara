@@ -51,7 +51,17 @@ async def list_profiles(
 async def create_profile(
     profile_data: ProfileCreate,
     request: Request,
-    current_user: VerifiedUser,
+    current_user: CurrentUser,
+    # WHY CurrentUser (not VerifiedUser) HERE:
+    # Profile creation and update are required during onboarding, which
+    # happens immediately after registration before the user has had a
+    # chance to verify their email. Blocking profile setup behind email
+    # verification creates a chicken-and-egg problem: users can't use
+    # the app meaningfully until their profile is complete, but they
+    # can't complete their profile if email verification is required first.
+    # The verification gate is correctly applied to the safety-critical
+    # features (interaction checking, AI chat) — not to profile management,
+    # which is harmless data the user is entering about themselves.
     db: DBSession,
 ) -> ProfileResponse:
     service = ProfileService(db=db)
@@ -96,7 +106,9 @@ async def update_profile(
     profile_id: str,
     update_data: ProfileUpdate,
     request: Request,
-    current_user: VerifiedUser,
+    current_user: CurrentUser,
+    # WHY CurrentUser: same reasoning as create_profile above —
+    # profile updates must work during onboarding before email verification.
     db: DBSession,
 ) -> ProfileResponse:
     """

@@ -131,6 +131,21 @@ class ProfileService:
                 value = sanitize_text_input(value)
             setattr(profile, field, value)
 
+        # WHY SET onboarding_completed HERE:
+        # When a user updates their profile with a real name (not the default
+        # "Me" placeholder), it signals they've completed the onboarding flow.
+        # We flip this flag on the User model so the frontend can check it via
+        # /auth/me and skip the onboarding screen on subsequent logins.
+        if updates.get("name") and updates["name"].strip().lower() != "me":
+            from sqlalchemy import select
+            from models.user import User
+            user_result = await self.db.execute(
+                select(User).where(User.id == user_id)
+            )
+            user_obj = user_result.scalar_one_or_none()
+            if user_obj and not user_obj.onboarding_completed:
+                user_obj.onboarding_completed = True
+
         await self.audit.log(
             event_type=AuditEventType.PROFILE_UPDATED,
             outcome=AuditOutcome.SUCCESS,

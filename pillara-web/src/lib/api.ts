@@ -64,6 +64,25 @@ async function apiFetch<T>(path: string, options: FetchOptions = {}): Promise<T>
   const data = await response.json()
 
   if (!response.ok) {
+    // WHY AUTO-REDIRECT ON 401:
+    // A 401 during a normal session means the JWT expired (30 min window).
+    // Showing a raw error message in the UI is confusing — the user didn't
+    // do anything wrong. The right behavior is to clear the stale token,
+    // redirect to login, and let them sign in with a fresh token.
+    // We check the error code specifically to avoid redirecting on other
+    // 401 cases (e.g. wrong password on the login page itself).
+    if (
+      response.status === 401 &&
+      data.error === 'authentication_required' &&
+      typeof window !== 'undefined' &&
+      !window.location.pathname.includes('/login') &&
+      !window.location.pathname.includes('/register')
+    ) {
+      clearTokens()
+      window.location.href = '/login'
+      throw new APIError(401, 'authentication_required', 'Session expired. Please sign in again.')
+    }
+
     throw new APIError(
       response.status,
       data.error || 'unknown_error',

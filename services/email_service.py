@@ -37,15 +37,9 @@ async def send_verification_email(to_email: str, verification_token: str) -> boo
     Never raises — see module docstring for why.
     """
     if not settings.RESEND_API_KEY:
-        # Don't attempt to send with no key configured — log once, clearly,
-        # rather than letting the Resend SDK fail with a less obvious error.
         logger.warning(
             "verification_email_skipped",
             reason="RESEND_API_KEY not configured",
-            # WHY no_phi_context: to_email is genuinely needed here to debug
-            # delivery issues, and this is a system configuration warning,
-            # not a patient-data-bearing log line. See monitoring/logger.py
-            # for the same reasoning applied to the FDA seeding script.
             no_phi_context=True,
             to_email=to_email,
         )
@@ -64,10 +58,6 @@ async def send_verification_email(to_email: str, verification_token: str) -> boo
         return True
 
     except Exception as error:
-        # Broad except is deliberate here: Resend's SDK can raise several
-        # different exception types (network errors, API errors, validation
-        # errors), and we want ALL of them to result in the same outcome —
-        # log it, return False, let registration continue.
         logger.error(
             "verification_email_failed",
             error=str(error),
@@ -76,6 +66,74 @@ async def send_verification_email(to_email: str, verification_token: str) -> boo
             to_email=to_email,
         )
         return False
+
+
+async def send_password_reset_email(to_email: str, reset_token: str) -> bool:
+    """
+    Sends a password reset email via Resend.
+
+    Returns True if the send call succeeded, False otherwise.
+    Never raises — same reasoning as send_verification_email.
+
+    SECURITY NOTE:
+    The raw_token goes in the email link.
+    The DB stores only the hash of the token.
+    If this email is intercepted, the attacker gets the raw token —
+    but it expires in PASSWORD_RESET_TOKEN_EXPIRE_MINUTES (default 30 min).
+    """
+    if not settings.RESEND_API_KEY:
+        logger.warning(
+            "password_reset_email_skipped",
+            reason="RESEND_API_KEY not configured",
+            no_phi_context=True,
+            to_email=to_email,
+        )
+        return False
+
+    reset_link = f"{settings.FRONTEND_URL}/reset-password?token={reset_token}"
+
+    try:
+        resend.Emails.send({
+            "from": settings.FROM_EMAIL,
+            "to": to_email,
+            "subject": "Reset your Pillara password",
+            "html": _password_reset_email_html(reset_link),
+        })
+        logger.info("password_reset_email_sent", no_phi_context=True, to_email=to_email)
+        return True
+
+    except Exception as error:
+        logger.error(
+            "password_reset_email_failed",
+            error=str(error),
+            error_type=type(error).__name__,
+            no_phi_context=True,
+            to_email=to_email,
+        )
+        return False
+
+
+def _password_reset_email_html(reset_link: str) -> str:
+    return f"""
+    <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+        <h2>Reset your Pillara password</h2>
+        <p>We received a request to reset your password. Click the button below to choose a new one:</p>
+        <p>
+            <a href="{reset_link}"
+               style="display: inline-block; padding: 12px 24px; background: #2563eb;
+                      color: #ffffff; text-decoration: none; border-radius: 6px;">
+                Reset Password
+            </a>
+        </p>
+        <p style="color: #666; font-size: 13px;">
+            This link expires in 30 minutes.<br><br>
+            If you didn't request a password reset, you can safely ignore this email.
+            Your password will not change.<br><br>
+            If the button doesn't work, copy and paste this link into your browser:<br>
+            {reset_link}
+        </p>
+    </div>
+    """
 
 
 def _verification_email_html(verification_link: str) -> str:

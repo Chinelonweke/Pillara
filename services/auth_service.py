@@ -419,9 +419,12 @@ class AuthService:
                 minutes=settings.PASSWORD_RESET_TOKEN_EXPIRE_MINUTES
             )
 
-            # TODO: Queue email: send raw_token in the reset link URL
-            # The raw_token goes in the email. The hash stays in the DB.
-            # await send_password_reset_email.enqueue(email=user.email, token=raw_token)
+            # Send the reset email — raw_token goes in the link, hash stays in DB
+            from services.email_service import send_password_reset_email
+            await send_password_reset_email(
+                to_email=user.email,
+                reset_token=raw_token,
+            )
 
             await self.audit.log(
                 event_type=AuditEventType.PASSWORD_RESET,

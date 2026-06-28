@@ -74,7 +74,7 @@ class Settings(BaseSettings):
 
     OPENROUTER_API_KEY: Optional[str] = None
     OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
-    OPENROUTER_SITE_URL: str = "https://pillara.app"
+    OPENROUTER_SITE_URL: str = "https://pillara.site"
     OPENROUTER_SITE_NAME: str = "Pillara"
 
     TOGETHER_API_KEY: Optional[str] = None
@@ -116,7 +116,8 @@ class Settings(BaseSettings):
 
     # ── NOTIFICATIONS ─────────────────────────────────────────────────────────
     RESEND_API_KEY: Optional[str] = None
-    FROM_EMAIL: str = "onboarding@resend.dev"
+    FROM_EMAIL: str = "noreply@pillara.site"          
+    ALERT_EMAIL: str = "Nwekechinelo25@yahoo.com"     
     FRONTEND_URL: str = "http://localhost:3000"
 
     VAPID_PUBLIC_KEY: Optional[str] = None
@@ -146,9 +147,10 @@ class Settings(BaseSettings):
     ALLOWED_ORIGINS: List[str] = [
         "http://localhost:3000",
         "http://localhost:5173",
-        "https://pillara.app",
-        "https://www.pillara.app",
+        "https://pillara.site",
+        "https://www.pillara.site",
     ]
+    VAPID_EMAIL: str = "mailto:noreply@pillara.site"
 
     @field_validator("ENVIRONMENT")
     @classmethod

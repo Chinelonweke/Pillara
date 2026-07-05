@@ -164,3 +164,58 @@ def _verification_email_html(verification_link: str) -> str:
         </p>
     </div>
     """
+
+async def send_profile_invite_email(to_email: str, invite_link: str, role: str, inviter_name: str) -> bool:
+    if not settings.RESEND_API_KEY:
+        return False
+
+    role_description = {
+        "caregiver": "view medications and add new ones",
+        "viewer": "view medications (read only)",
+    }.get(role, "access the profile")
+
+    try:
+        resend.Emails.send({
+            "from": settings.FROM_EMAIL,
+            "to": to_email,
+            "subject": "You've been invited to access a Pillara profile",
+            "html": f"""
+            <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+                <h2>You have a Pillara invitation</h2>
+                <p><strong>{inviter_name}</strong> has invited you to {role_description}.</p>
+                <p><a href="{invite_link}" style="display:inline-block;padding:12px 24px;background:#4A9B8E;color:#fff;text-decoration:none;border-radius:6px;">Accept Invitation</a></p>
+                <p style="color:#666;font-size:13px;">This link expires in 7 days. If you don't know {inviter_name}, ignore this email.</p>
+            </div>
+            """,
+        })
+        logger.info("profile_invite_email_sent", to_email=to_email, role=role)
+        return True
+    except Exception as error:
+        logger.error("profile_invite_email_failed", error=str(error))
+        return False
+
+
+async def send_profile_claim_email(to_email: str, claim_link: str, caregiver_email: str) -> bool:
+    if not settings.RESEND_API_KEY:
+        return False
+
+    try:
+        resend.Emails.send({
+            "from": settings.FROM_EMAIL,
+            "to": to_email,
+            "subject": "A medication profile has been created for you on Pillara",
+            "html": f"""
+            <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+                <h2>A profile was created for you</h2>
+                <p><strong>{caregiver_email}</strong> has created a medication profile for you on Pillara.</p>
+                <p>You can claim ownership of it, or ignore this email and let your caregiver manage it.</p>
+                <p><a href="{claim_link}" style="display:inline-block;padding:12px 24px;background:#4A9B8E;color:#fff;text-decoration:none;border-radius:6px;">Claim My Profile</a></p>
+                <p style="color:#666;font-size:13px;">This link expires in 7 days. If you don't know {caregiver_email}, ignore this email.</p>
+            </div>
+            """,
+        })
+        logger.info("profile_claim_email_sent", to_email=to_email)
+        return True
+    except Exception as error:
+        logger.error("profile_claim_email_failed", error=str(error))
+        return False

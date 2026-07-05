@@ -1,16 +1,20 @@
 # api/routers/profiles.py
 #
 # PROFILE ENDPOINTS:
-# GET    /profiles/          — list all profiles for current user
-# POST   /profiles/          — create a new profile
-# GET    /profiles/{id}      — get one profile (IDOR protected)
-# PATCH  /profiles/{id}      — update a profile (IDOR protected)
-# DELETE /profiles/{id}      — delete a profile (IDOR protected)
-# GET    /profiles/{id}/insights — get AI health insights for profile
+# GET    /api/v1/profiles/          — list own profiles
+# POST   /api/v1/profiles/          — create a new profile
+# GET    /api/v1/profiles/{id}      — get one profile (IDOR protected)
+# PATCH  /api/v1/profiles/{id}      — update a profile (IDOR protected)
+# DELETE /api/v1/profiles/{id}      — delete a profile (IDOR protected)
+#
+# NOTE: Sharing endpoints live at /api/v1/sharing/ — separate prefix
+# avoids all route conflicts with /{profile_id}.
+
+from uuid import UUID
 
 from fastapi import APIRouter, Request
 
-from api.dependencies import CurrentUser, DBSession, RedisClient, VerifiedUser, rate_limit_llm
+from api.dependencies import CurrentUser, DBSession, VerifiedUser
 from services.profile_service import ProfileService
 from schemas.all_schemas import (
     ProfileCreate,
@@ -35,7 +39,7 @@ async def list_profiles(
 ) -> list[ProfileResponse]:
     """
     Returns all profiles belonging to the authenticated user.
-    IDOR safe: query always filters by current_user.id — users only see their own profiles.
+    IDOR safe: query always filters by current_user.id.
     """
     service = ProfileService(db=db)
     profiles = await service.list_profiles(user_id=current_user.id)
@@ -52,18 +56,13 @@ async def create_profile(
     profile_data: ProfileCreate,
     request: Request,
     current_user: CurrentUser,
-    # WHY CurrentUser (not VerifiedUser) HERE:
-    # Profile creation and update are required during onboarding, which
-    # happens immediately after registration before the user has had a
-    # chance to verify their email. Blocking profile setup behind email
-    # verification creates a chicken-and-egg problem: users can't use
-    # the app meaningfully until their profile is complete, but they
-    # can't complete their profile if email verification is required first.
-    # The verification gate is correctly applied to the safety-critical
-    # features (interaction checking, AI chat) — not to profile management,
-    # which is harmless data the user is entering about themselves.
     db: DBSession,
 ) -> ProfileResponse:
+    """
+    WHY CurrentUser (not VerifiedUser):
+    Profile creation happens during onboarding before email verification.
+    The verification gate applies to safety-critical features only.
+    """
     service = ProfileService(db=db)
     profile = await service.create_profile(
         user_id=current_user.id,
@@ -79,18 +78,21 @@ async def create_profile(
     summary="Get a specific profile",
 )
 async def get_profile(
-    profile_id: str,
+    profile_id: UUID,
     request: Request,
     current_user: CurrentUser,
     db: DBSession,
 ) -> ProfileResponse:
     """
-    IDOR protection: profile_id is validated against current_user.id inside the service.
-    A user cannot fetch another user's profile — they get 404.
+    WHY profile_id is UUID type:
+    FastAPI validates path param as UUID before the route runs.
+    Any non-UUID string is rejected at routing level — 422 returned
+    immediately, no database query runs.
+    IDOR protection: profile_id validated against current_user.id in service.
     """
     service = ProfileService(db=db)
     profile = await service.get_profile(
-        profile_id=profile_id,
+        profile_id=str(profile_id),
         user_id=current_user.id,
         request_id=request.state.request_id,
     )
@@ -103,22 +105,19 @@ async def get_profile(
     summary="Update a profile",
 )
 async def update_profile(
-    profile_id: str,
+    profile_id: UUID,
     update_data: ProfileUpdate,
     request: Request,
     current_user: CurrentUser,
-    # WHY CurrentUser: same reasoning as create_profile above —
-    # profile updates must work during onboarding before email verification.
     db: DBSession,
 ) -> ProfileResponse:
     """
     MASS ASSIGNMENT PROTECTION: ProfileUpdate schema excludes id, user_id, is_primary.
-    Users cannot change profile ownership or promote themselves via field injection.
     IDOR protection: service validates profile belongs to current_user.
     """
     service = ProfileService(db=db)
     profile = await service.update_profile(
-        profile_id=profile_id,
+        profile_id=str(profile_id),
         user_id=current_user.id,
         update_data=update_data,
         request_id=request.state.request_id,
@@ -132,18 +131,18 @@ async def update_profile(
     summary="Delete a profile",
 )
 async def delete_profile(
-    profile_id: str,
+    profile_id: UUID,
     request: Request,
     current_user: VerifiedUser,
     db: DBSession,
 ) -> SuccessResponse:
     """
-    Cannot delete the primary profile — at least one profile must always exist.
+    Cannot delete the primary profile.
     IDOR protection: service validates ownership.
     """
     service = ProfileService(db=db)
     await service.delete_profile(
-        profile_id=profile_id,
+        profile_id=str(profile_id),
         user_id=current_user.id,
         request_id=request.state.request_id,
     )

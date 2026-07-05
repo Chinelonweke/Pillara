@@ -25,6 +25,8 @@ export default function DashboardPage() {
   const router = useRouter()
 
   const [profile, setProfile] = useState<Profile | null>(null)
+  const [allProfiles, setAllProfiles] = useState<any[]>([])
+  const [showProfileSwitcher, setShowProfileSwitcher] = useState(false)
   const [meds, setMeds] = useState<Medication[]>([])
   const [loadingData, setLoadingData] = useState(true)
 
@@ -62,6 +64,16 @@ export default function DashboardPage() {
 
     const loadData = async () => {
       try {
+        // Fetch all accessible profiles including shared ones
+        const token = localStorage.getItem('access_token')
+        const allRes = await fetch('/api/v1/sharing/all', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        })
+        if (allRes.ok) {
+          const allProfileData = await allRes.json()
+          setAllProfiles(allProfileData)
+        }
+
         const profileList = await profiles.list()
         const primaryProfile = profileList.find(p => p.is_primary) || profileList[0]
         if (primaryProfile) {
@@ -140,7 +152,27 @@ export default function DashboardPage() {
     }
   }
 
-  const handleLogout = async () => {
+  const switchProfile = async (profileId: string) => {
+    setShowProfileSwitcher(false)
+    setLoadingData(true)
+    try {
+      const profileList = await profiles.list()
+      const selected = profileList.find((p: any) => p.id === profileId)
+      if (selected) {
+        setProfile(selected)
+        const medList = await medications.list(selected.id)
+        setMeds(medList)
+        setCheckResult(null)
+        setChatMessages([])
+      }
+    } catch (err) {
+      console.error('Failed to switch profile:', err)
+    } finally {
+      setLoadingData(false)
+    }
+  }
+
+ const handleLogout = async () => {
     await logout()
     router.push('/')
   }
@@ -215,6 +247,66 @@ export default function DashboardPage() {
               <span className="text-white font-bold text-xs">P</span>
             </div>
             <span className="text-white font-semibold">Pillara</span>
+
+            {/* Profile Switcher */}
+            {allProfiles.length > 0 && (
+              <div className="relative ml-4">
+                <button
+                  onClick={() => setShowProfileSwitcher(!showProfileSwitcher)}
+                  className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white hover:bg-white/10 transition-colors"
+                >
+                  <span className="text-[#4A9B8E]">👤</span>
+                  <span className="max-w-[120px] truncate">{profile?.name || 'Select profile'}</span>
+                  <span className="text-slate-400 text-xs">▾</span>
+                </button>
+
+                {showProfileSwitcher && (
+                  <div className="absolute top-full left-0 mt-2 w-64 bg-[#1a2d47] border border-white/10 rounded-xl shadow-xl z-50 overflow-hidden">
+                    <div className="px-3 py-2 border-b border-white/10">
+                      <p className="text-xs text-slate-400 font-medium uppercase tracking-wide">Switch Profile</p>
+                    </div>
+                    {allProfiles.map((p: any) => (
+                      <button
+                        key={p.id}
+                        onClick={() => switchProfile(p.id)}
+                        className={`w-full flex items-center justify-between px-3 py-2.5 hover:bg-white/5 transition-colors ${
+                          profile?.id === p.id ? 'bg-[#4A9B8E]/10' : ''
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 text-left">
+                          <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${
+                            p.is_shared_with_me
+                              ? 'bg-purple-500/20 text-purple-400'
+                              : 'bg-[#4A9B8E]/20 text-[#4A9B8E]'
+                          }`}>
+                            {p.name.charAt(0).toUpperCase()}
+                          </div>
+                          <div>
+                            <p className="text-white text-sm font-medium">{p.name}</p>
+                            <p className="text-slate-500 text-xs capitalize">
+                              {p.is_shared_with_me ? `Shared · ${p.role}` : p.role}
+                            </p>
+                          </div>
+                        </div>
+                        {profile?.id === p.id && (
+                          <span className="text-[#4A9B8E] text-xs">✓</span>
+                        )}
+                      </button>
+                    ))}
+                    <div className="border-t border-white/10 px-3 py-2">
+                      <Link
+                        href="/onboarding"
+                        className="flex items-center gap-2 text-slate-400 hover:text-white text-sm transition-colors"
+                        onClick={() => setShowProfileSwitcher(false)}
+                      >
+                        <span>+</span>
+                        <span>Add profile</span>
+                      </Link>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-4">
             {!user.is_verified && (

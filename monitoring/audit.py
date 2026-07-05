@@ -71,6 +71,10 @@ class AuditEventType(str, Enum):
     PROFILE_VIEWED       = "profile_viewed"
     PROFILE_UPDATED      = "profile_updated"
     PROFILE_DELETED      = "profile_deleted"
+    PROFILE_INVITE_SENT      = "profile_invite_sent"
+    PROFILE_INVITE_ACCEPTED  = "profile_invite_accepted"
+    PROFILE_ACCESS_REVOKED   = "profile_access_revoked"
+    PROFILE_CLAIMED          = "profile_claimed"
 
     # Medication events (PHI access — most important to audit)
     MEDICATION_ADDED     = "medication_added"

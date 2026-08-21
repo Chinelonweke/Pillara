@@ -5,21 +5,293 @@ import { useRouter } from 'next/navigation'
 import { useAuth } from '@/lib/auth-context'
 import { profiles, medications, interactions, ai, Profile, Medication, InteractionCheckResponse, APIError } from '@/lib/api'
 
-// Strip markdown symbols from LLM-generated text before display.
-// WHY: LLMs occasionally ignore plain-text instructions and generate
-// markdown. In a healthcare UI, **bold** rendering as literal asterisks
-// looks unprofessional and erodes trust. This is a defensive fallback —
-// the prompt already instructs the LLM to avoid markdown.
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+
 function stripMarkdown(text: string): string {
   return text
-    .replace(/\*\*(.*?)\*\*/g, '$1')   // **bold** → bold
-    .replace(/\*(.*?)\*/g, '$1')        // *italic* → italic
-    .replace(/^#{1,6}\s+/gm, '')        // ## headers → plain text
-    .replace(/^[\*\-]\s+/gm, '')        // * bullet or - bullet → plain
-    .replace(/^\d+\.\s+/gm, '')         // 1. numbered list → plain
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/\*(.*?)\*/g, '$1')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/^[\*\-]\s+/gm, '')
+    .replace(/^\d+\.\s+/gm, '')
     .trim()
 }
 
+// ── Share Panel Modal ─────────────────────────────────────────────────────────
+function SharePanel({
+  profileId,
+  profileName,
+  userRole,
+  onClose,
+}: {
+  profileId: string
+  profileName: string
+  userRole: string
+  onClose: () => void
+}) {
+  const token = localStorage.getItem('pillara_access_token')
+  const headers = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
+
+  const [tab, setTab] = useState<'invite' | 'claim' | 'members'>('members')
+  const [members, setMembers] = useState<any[]>([])
+  const [loadingMembers, setLoadingMembers] = useState(true)
+
+  // Invite state
+  const [inviteEmail, setInviteEmail] = useState('')
+  const [inviteRole, setInviteRole] = useState('viewer')
+  const [inviting, setInviting] = useState(false)
+  const [inviteMsg, setInviteMsg] = useState('')
+  const [inviteError, setInviteError] = useState('')
+
+  // Claim invite state
+  const [claimEmail, setClaimEmail] = useState('')
+  const [claiming, setClaiming] = useState(false)
+  const [claimMsg, setClaimMsg] = useState('')
+  const [claimError, setClaimError] = useState('')
+
+  useEffect(() => {
+    fetchMembers()
+  }, [])
+
+  const fetchMembers = async () => {
+    setLoadingMembers(true)
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/sharing/${profileId}/members`, { headers: { 'Authorization': `Bearer ${token}` } })
+      if (res.ok) setMembers(await res.json())
+    } catch {}
+    finally { setLoadingMembers(false) }
+  }
+
+  const handleInvite = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setInviting(true)
+    setInviteError('')
+    setInviteMsg('')
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/sharing/${profileId}/invite`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ email: inviteEmail, role: inviteRole }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setInviteError(data.message || 'Failed to send invite'); return }
+      setInviteMsg(`Invite sent to ${inviteEmail}. They have 7 days to accept.`)
+      setInviteEmail('')
+      fetchMembers()
+    } catch { setInviteError('Something went wrong. Please try again.') }
+    finally { setInviting(false) }
+  }
+
+  const handleClaimInvite = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setClaiming(true)
+    setClaimError('')
+    setClaimMsg('')
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/sharing/${profileId}/send-claim-invite`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ patient_email: claimEmail }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setClaimError(data.message || 'Failed to send claim invite'); return }
+      setClaimMsg(`Claim invitation sent to ${claimEmail}. They have 7 days to claim ownership.`)
+      setClaimEmail('')
+    } catch { setClaimError('Something went wrong. Please try again.') }
+    finally { setClaiming(false) }
+  }
+
+  const handleRevoke = async (targetUserId: string) => {
+    if (!confirm('Revoke this person\'s access?')) return
+    try {
+      await fetch(`${API_BASE}/api/v1/sharing/${profileId}/members/${targetUserId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` },
+      })
+      fetchMembers()
+    } catch {}
+  }
+
+  const isOwner = userRole === 'owner'
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-[#0F1B2D] border border-white/10 rounded-2xl w-full max-w-lg shadow-2xl">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
+          <div>
+            <h2 className="text-white font-semibold">Share Profile</h2>
+            <p className="text-slate-400 text-xs mt-0.5">{profileName} · Your role: <span className="text-[#4A9B8E] capitalize">{userRole}</span></p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors text-xl">✕</button>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex border-b border-white/10">
+          {(['members', 'invite', 'claim'] as const).map(t => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`flex-1 py-3 text-sm font-medium transition-colors capitalize ${
+                tab === t ? 'text-[#4A9B8E] border-b-2 border-[#4A9B8E]' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              {t === 'claim' ? 'Send to Patient' : t === 'invite' ? 'Invite Caregiver' : 'Members'}
+            </button>
+          ))}
+        </div>
+
+        <div className="p-6">
+          {/* Members tab */}
+          {tab === 'members' && (
+            <div>
+              {loadingMembers ? (
+                <p className="text-slate-400 text-sm text-center py-4">Loading members...</p>
+              ) : members.length === 0 ? (
+                <div className="text-center py-8">
+                  <p className="text-slate-400 text-sm">No one has access to this profile yet.</p>
+                  {isOwner && <p className="text-slate-500 text-xs mt-1">Use the tabs above to invite a caregiver or send to a patient.</p>}
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {members.map((m, i) => (
+                    <div key={i} className="flex items-center justify-between bg-white/5 border border-white/10 rounded-xl px-4 py-3">
+                      <div>
+                        <p className="text-white text-sm">{m.email || 'Unknown'}</p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className="text-[#4A9B8E] text-xs capitalize">{m.role}</span>
+                          <span className="text-slate-600 text-xs">·</span>
+                          <span className={`text-xs capitalize ${m.status === 'active' ? 'text-green-400' : 'text-yellow-400'}`}>
+                            {m.status}
+                          </span>
+                        </div>
+                      </div>
+                      {isOwner && m.user_id && (
+                        <button
+                          onClick={() => handleRevoke(m.user_id)}
+                          className="text-slate-500 hover:text-red-400 text-xs transition-colors"
+                        >
+                          Revoke
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Invite caregiver tab */}
+          {tab === 'invite' && (
+            <div>
+              {!isOwner ? (
+                <p className="text-slate-400 text-sm text-center py-4">Only the profile owner can invite others.</p>
+              ) : (
+                <>
+                  <p className="text-slate-400 text-sm mb-4 leading-relaxed">
+                    Invite a caregiver or nurse to access this profile. They'll receive an email with a link to accept.
+                  </p>
+
+                  {inviteMsg && (
+                    <div className="bg-[#4A9B8E]/10 border border-[#4A9B8E]/20 rounded-lg px-4 py-3 mb-4">
+                      <p className="text-[#4A9B8E] text-sm">✓ {inviteMsg}</p>
+                    </div>
+                  )}
+                  {inviteError && (
+                    <div className="bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-3 mb-4">
+                      <p className="text-red-400 text-sm">{inviteError}</p>
+                    </div>
+                  )}
+
+                  <form onSubmit={handleInvite} className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-300 mb-2">Email address</label>
+                      <input
+                        type="email"
+                        value={inviteEmail}
+                        onChange={e => setInviteEmail(e.target.value)}
+                        required
+                        placeholder="caregiver@example.com"
+                        className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-[#4A9B8E] text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-300 mb-2">Role</label>
+                      <select
+                        value={inviteRole}
+                        onChange={e => setInviteRole(e.target.value)}
+                        className="w-full bg-[#1a2d47] border border-white/10 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-[#4A9B8E] text-sm"
+                      >
+                        <option value="caregiver">Caregiver — can view and add medications</option>
+                        <option value="viewer">Viewer — read only (e.g. nurse)</option>
+                      </select>
+                    </div>
+                    <button
+                      type="submit"
+                      disabled={inviting}
+                      className="w-full bg-[#4A9B8E] hover:bg-[#3d8a7d] disabled:opacity-50 text-white py-2.5 rounded-lg text-sm font-medium transition-colors"
+                    >
+                      {inviting ? 'Sending invite...' : 'Send invite'}
+                    </button>
+                  </form>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Send to patient tab */}
+          {tab === 'claim' && (
+            <div>
+              {!isOwner ? (
+                <p className="text-slate-400 text-sm text-center py-4">Only the profile owner can send claim invites.</p>
+              ) : (
+                <>
+                  <p className="text-slate-400 text-sm mb-4 leading-relaxed">
+                    Email the patient so they can claim ownership of this profile. They can sign up and take full control, or ignore the email and let you continue managing it.
+                  </p>
+
+                  {claimMsg && (
+                    <div className="bg-[#4A9B8E]/10 border border-[#4A9B8E]/20 rounded-lg px-4 py-3 mb-4">
+                      <p className="text-[#4A9B8E] text-sm">✓ {claimMsg}</p>
+                    </div>
+                  )}
+                  {claimError && (
+                    <div className="bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-3 mb-4">
+                      <p className="text-red-400 text-sm">{claimError}</p>
+                    </div>
+                  )}
+
+                  <form onSubmit={handleClaimInvite} className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-300 mb-2">Patient's email address</label>
+                      <input
+                        type="email"
+                        value={claimEmail}
+                        onChange={e => setClaimEmail(e.target.value)}
+                        required
+                        placeholder="patient@example.com"
+                        className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-[#4A9B8E] text-sm"
+                      />
+                    </div>
+                    <button
+                      type="submit"
+                      disabled={claiming}
+                      className="w-full bg-[#4A9B8E] hover:bg-[#3d8a7d] disabled:opacity-50 text-white py-2.5 rounded-lg text-sm font-medium transition-colors"
+                    >
+                      {claiming ? 'Sending...' : 'Send claim invitation'}
+                    </button>
+                  </form>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Main Dashboard ────────────────────────────────────────────────────────────
 export default function DashboardPage() {
   const { user, logout, loading: authLoading } = useAuth()
   const router = useRouter()
@@ -27,59 +299,46 @@ export default function DashboardPage() {
   const [profile, setProfile] = useState<Profile | null>(null)
   const [allProfiles, setAllProfiles] = useState<any[]>([])
   const [showProfileSwitcher, setShowProfileSwitcher] = useState(false)
+  const [showSharePanel, setShowSharePanel] = useState(false)
   const [meds, setMeds] = useState<Medication[]>([])
   const [loadingData, setLoadingData] = useState(true)
 
-  // Add medication form
   const [newMedName, setNewMedName] = useState('')
   const [newMedDosage, setNewMedDosage] = useState('')
   const [addingMed, setAddingMed] = useState(false)
   const [addMedError, setAddMedError] = useState('')
 
-  // Interaction check
   const [checkResult, setCheckResult] = useState<InteractionCheckResponse | null>(null)
   const [checking, setChecking] = useState(false)
   const [checkError, setCheckError] = useState('')
 
-  // AI Chat
   const [chatMessages, setChatMessages] = useState<{role: 'user' | 'assistant', content: string}[]>([])
   const [chatInput, setChatInput] = useState('')
   const [chatLoading, setChatLoading] = useState(false)
   const [chatError, setChatError] = useState('')
   const [conversationId, setConversationId] = useState<string | undefined>(undefined)
 
-  // Redirect to login if not authenticated, onboarding if not completed
   useEffect(() => {
-    if (!authLoading && !user) {
-      router.push('/login')
-    }
-    if (!authLoading && user && !user.onboarding_completed) {
-      router.push('/onboarding')
-    }
+    if (!authLoading && !user) router.push('/login')
+    if (!authLoading && user && !user.onboarding_completed) router.push('/onboarding')
   }, [user, authLoading, router])
 
-  // Load profile and medications
   useEffect(() => {
     if (!user) return
 
     const loadData = async () => {
       try {
-        // Fetch all accessible profiles including shared ones
-        const token = localStorage.getItem('access_token')
-        const allRes = await fetch('/api/v1/sharing/all', {
+        const token = localStorage.getItem('pillara_access_token')
+        const allRes = await fetch(`${API_BASE}/api/v1/sharing/all`, {
           headers: { 'Authorization': `Bearer ${token}` }
         })
-        if (allRes.ok) {
-          const allProfileData = await allRes.json()
-          setAllProfiles(allProfileData)
-        }
+        if (allRes.ok) setAllProfiles(await allRes.json())
 
         const profileList = await profiles.list()
         const primaryProfile = profileList.find(p => p.is_primary) || profileList[0]
         if (primaryProfile) {
           setProfile(primaryProfile)
-          const medList = await medications.list(primaryProfile.id)
-          setMeds(medList)
+          setMeds(await medications.list(primaryProfile.id))
         }
       } catch (err) {
         console.error('Failed to load profile data:', err)
@@ -95,7 +354,6 @@ export default function DashboardPage() {
     try {
       await medications.delete(medicationId)
       setMeds(prev => prev.filter(m => m.id !== medicationId))
-      // Clear check results since the medication list changed
       setCheckResult(null)
     } catch (err) {
       console.error('Failed to delete medication:', err)
@@ -105,10 +363,8 @@ export default function DashboardPage() {
   const handleAddMedication = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!profile || !newMedName.trim()) return
-
     setAddingMed(true)
     setAddMedError('')
-
     try {
       const newMed = await medications.add(profile.id, {
         name: newMedName.trim(),
@@ -118,11 +374,7 @@ export default function DashboardPage() {
       setNewMedName('')
       setNewMedDosage('')
     } catch (err) {
-      if (err instanceof APIError) {
-        setAddMedError(err.message)
-      } else {
-        setAddMedError('Failed to add medication. Please try again.')
-      }
+      setAddMedError(err instanceof APIError ? err.message : 'Failed to add medication. Please try again.')
     } finally {
       setAddingMed(false)
     }
@@ -130,23 +382,15 @@ export default function DashboardPage() {
 
   const handleInteractionCheck = async () => {
     if (!profile || meds.length < 1) return
-
     setChecking(true)
     setCheckError('')
     setCheckResult(null)
-
     try {
       const drugNames = meds.map(m => m.name)
-      // Need at least 2 drugs — add a placeholder if only one
       const drugsToCheck = drugNames.length >= 2 ? drugNames : [...drugNames, ...drugNames]
-      const result = await interactions.check(drugsToCheck.slice(0, 10), profile.id)
-      setCheckResult(result)
+      setCheckResult(await interactions.check(drugsToCheck.slice(0, 10), profile.id))
     } catch (err) {
-      if (err instanceof APIError) {
-        setCheckError(err.message)
-      } else {
-        setCheckError('Interaction check failed. Please try again.')
-      }
+      setCheckError(err instanceof APIError ? err.message : 'Interaction check failed. Please try again.')
     } finally {
       setChecking(false)
     }
@@ -160,8 +404,7 @@ export default function DashboardPage() {
       const selected = profileList.find((p: any) => p.id === profileId)
       if (selected) {
         setProfile(selected)
-        const medList = await medications.list(selected.id)
-        setMeds(medList)
+        setMeds(await medications.list(selected.id))
         setCheckResult(null)
         setChatMessages([])
       }
@@ -172,47 +415,32 @@ export default function DashboardPage() {
     }
   }
 
- const handleLogout = async () => {
+  const handleLogout = async () => {
     await logout()
     router.push('/')
   }
 
   const handleChatSend = async () => {
     if (!chatInput.trim() || chatLoading) return
-
     const userMessage = chatInput.trim()
     setChatInput('')
     setChatError('')
     setChatMessages(prev => [...prev, { role: 'user', content: userMessage }])
     setChatLoading(true)
-
-    // Scroll to bottom after adding message
     setTimeout(() => {
       const el = document.getElementById('chat-messages')
       if (el) el.scrollTop = el.scrollHeight
     }, 50)
-
     try {
-      const result = await ai.query(
-        userMessage,
-        profile?.id,
-        conversationId,
-      )
+      const result = await ai.query(userMessage, profile?.id, conversationId)
       setConversationId(result.conversation_id)
       setChatMessages(prev => [...prev, { role: 'assistant', content: result.response_text }])
-
-      // Scroll to bottom after response
       setTimeout(() => {
         const el = document.getElementById('chat-messages')
         if (el) el.scrollTop = el.scrollHeight
       }, 50)
     } catch (err) {
-      if (err instanceof APIError) {
-        setChatError(err.message)
-      } else {
-        setChatError('Failed to get a response. Please try again.')
-      }
-      // Remove the user message if the request failed
+      setChatError(err instanceof APIError ? err.message : 'Failed to get a response. Please try again.')
       setChatMessages(prev => prev.slice(0, -1))
     } finally {
       setChatLoading(false)
@@ -229,6 +457,8 @@ export default function DashboardPage() {
 
   if (!user) return null
 
+  const currentProfileRole = allProfiles.find((p: any) => p.id === profile?.id)?.role || 'owner'
+
   const riskColor = {
     high: 'text-red-400 bg-red-500/10 border-red-500/20',
     moderate: 'text-[#F59E0B] bg-[#F59E0B]/10 border-[#F59E0B]/20',
@@ -239,6 +469,16 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-[#0F1B2D]">
+      {/* Share Panel Modal */}
+      {showSharePanel && profile && (
+        <SharePanel
+          profileId={profile.id}
+          profileName={profile.name}
+          userRole={currentProfileRole}
+          onClose={() => setShowSharePanel(false)}
+        />
+      )}
+
       {/* Top nav */}
       <nav className="border-b border-white/10 px-8 py-4">
         <div className="max-w-5xl mx-auto flex items-center justify-between">
@@ -275,9 +515,7 @@ export default function DashboardPage() {
                       >
                         <div className="flex items-center gap-2 text-left">
                           <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${
-                            p.is_shared_with_me
-                              ? 'bg-purple-500/20 text-purple-400'
-                              : 'bg-[#4A9B8E]/20 text-[#4A9B8E]'
+                            p.is_shared_with_me ? 'bg-purple-500/20 text-purple-400' : 'bg-[#4A9B8E]/20 text-[#4A9B8E]'
                           }`}>
                             {p.name.charAt(0).toUpperCase()}
                           </div>
@@ -288,9 +526,7 @@ export default function DashboardPage() {
                             </p>
                           </div>
                         </div>
-                        {profile?.id === p.id && (
-                          <span className="text-[#4A9B8E] text-xs">✓</span>
-                        )}
+                        {profile?.id === p.id && <span className="text-[#4A9B8E] text-xs">✓</span>}
                       </button>
                     ))}
                     <div className="border-t border-white/10 px-3 py-2">
@@ -314,16 +550,10 @@ export default function DashboardPage() {
                 <span className="text-[#F59E0B] text-xs">⚠️ Check your email to verify your account</span>
               </div>
             )}
-            <Link
-              href="/settings"
-              className="text-slate-400 hover:text-white text-sm transition-colors"
-            >
+            <Link href="/settings" className="text-slate-400 hover:text-white text-sm transition-colors">
               Settings
             </Link>
-            <button
-              onClick={handleLogout}
-              className="text-slate-400 hover:text-white text-sm transition-colors"
-            >
+            <button onClick={handleLogout} className="text-slate-400 hover:text-white text-sm transition-colors">
               Sign out
             </button>
           </div>
@@ -332,23 +562,35 @@ export default function DashboardPage() {
 
       <main className="max-w-5xl mx-auto px-8 py-10">
         {/* Profile header */}
-        <div className="mb-10">
-          <h1 className="text-2xl font-bold text-white mb-1">
-            {profile?.name || 'My Medications'}
-          </h1>
-          {profile?.known_allergies && (
-            <div className="flex items-center gap-2 mt-3">
-              <span className="text-xs text-[#F59E0B] bg-[#F59E0B]/10 border border-[#F59E0B]/20 rounded-full px-3 py-1">
-                ⚠️ Allergy: {profile.known_allergies}
-              </span>
-            </div>
-          )}
-          {profile?.medical_conditions && (
-            <div className="flex items-center gap-2 mt-2">
-              <span className="text-xs text-slate-400 bg-white/5 border border-white/10 rounded-full px-3 py-1">
-                Condition: {profile.medical_conditions}
-              </span>
-            </div>
+        <div className="mb-10 flex items-start justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-white mb-1">{profile?.name || 'My Medications'}</h1>
+            {profile?.known_allergies && (
+              <div className="flex items-center gap-2 mt-3">
+                <span className="text-xs text-[#F59E0B] bg-[#F59E0B]/10 border border-[#F59E0B]/20 rounded-full px-3 py-1">
+                  ⚠️ Allergy: {profile.known_allergies}
+                </span>
+              </div>
+            )}
+            {profile?.medical_conditions && (
+              <div className="flex items-center gap-2 mt-2">
+                <span className="text-xs text-slate-400 bg-white/5 border border-white/10 rounded-full px-3 py-1">
+                  Condition: {profile.medical_conditions}
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Share button */}
+          {profile && (
+            <button
+              onClick={() => setShowSharePanel(true)}
+              className="flex items-center gap-2 bg-white/5 border border-white/10 hover:border-[#4A9B8E]/50 rounded-lg px-4 py-2 text-sm text-slate-300 hover:text-white transition-colors"
+            >
+              <span>🔗</span>
+              <span>Share</span>
+              <span className="text-xs text-[#4A9B8E] capitalize ml-1">({currentProfileRole})</span>
+            </button>
           )}
         </div>
 
@@ -360,7 +602,6 @@ export default function DashboardPage() {
               <span className="text-slate-400 text-xs">{meds.length} total</span>
             </div>
 
-            {/* Medication list */}
             <div className="space-y-3 mb-6">
               {meds.length === 0 ? (
                 <div className="bg-white/5 border border-white/10 border-dashed rounded-xl p-8 text-center">
@@ -375,9 +616,7 @@ export default function DashboardPage() {
                   >
                     <div>
                       <p className="text-white text-sm font-medium capitalize">{med.name}</p>
-                      {med.dosage && (
-                        <p className="text-slate-400 text-xs mt-0.5">{med.dosage}</p>
-                      )}
+                      {med.dosage && <p className="text-slate-400 text-xs mt-0.5">{med.dosage}</p>}
                     </div>
                     <div className="flex items-center gap-3">
                       <div className="w-2 h-2 bg-[#4A9B8E] rounded-full" />
@@ -394,16 +633,13 @@ export default function DashboardPage() {
               )}
             </div>
 
-            {/* Add medication form */}
             <div className="bg-white/5 border border-white/10 rounded-xl p-5">
               <h3 className="text-white text-sm font-medium mb-4">Add medication</h3>
-
               {addMedError && (
                 <div className="bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2 mb-4">
                   <p className="text-red-400 text-xs">{addMedError}</p>
                 </div>
               )}
-
               <form onSubmit={handleAddMedication} className="space-y-3">
                 <input
                   type="text"
@@ -439,8 +675,7 @@ export default function DashboardPage() {
 
             <div className="bg-white/5 border border-white/10 rounded-xl p-5 mb-4">
               <p className="text-slate-400 text-sm mb-4 leading-relaxed">
-                Check all your current medications for dangerous interactions
-                and allergy cross-reactivity.
+                Check all your current medications for dangerous interactions and allergy cross-reactivity.
               </p>
               <button
                 onClick={handleInteractionCheck}
@@ -462,13 +697,11 @@ export default function DashboardPage() {
 
             {checkResult && (
               <div className="space-y-4">
-                {/* Overall risk */}
                 <div className={`border rounded-xl px-4 py-3 ${riskColor[checkResult.overall_risk as keyof typeof riskColor] || riskColor.unknown}`}>
                   <p className="text-xs font-medium uppercase tracking-wide mb-1 opacity-70">Overall risk</p>
                   <p className="font-semibold capitalize">{checkResult.overall_risk}</p>
                 </div>
 
-                {/* Allergy warnings — always shown prominently */}
                 {checkResult.allergy_warnings.length > 0 && (
                   <div className="bg-[#F59E0B]/10 border border-[#F59E0B]/30 rounded-xl p-4">
                     <div className="flex items-center gap-2 mb-3">
@@ -479,9 +712,7 @@ export default function DashboardPage() {
                     </div>
                     {checkResult.allergy_warnings.map((warning, i) => (
                       <div key={i} className="mb-3 last:mb-0">
-                        <p className="text-white text-sm font-medium capitalize mb-1">
-                          {warning.drug_name} — {warning.allergen} allergy
-                        </p>
+                        <p className="text-white text-sm font-medium capitalize mb-1">{warning.drug_name} — {warning.allergen} allergy</p>
                         <p className="text-slate-300 text-xs leading-relaxed mb-2">{warning.description}</p>
                         <p className="text-[#F59E0B] text-xs font-medium">{warning.action_required}</p>
                       </div>
@@ -489,18 +720,13 @@ export default function DashboardPage() {
                   </div>
                 )}
 
-                {/* Summary */}
                 <div className="bg-white/5 border border-white/10 rounded-xl p-4">
                   <p className="text-slate-300 text-xs font-medium mb-3 uppercase tracking-wide">Analysis</p>
                   <p className="text-slate-300 text-sm leading-7">{stripMarkdown(checkResult.summary)}</p>
                 </div>
 
-                {/* Disclaimer */}
-                <p className="text-slate-500 text-xs leading-relaxed px-1">
-                  {checkResult.disclaimer}
-                </p>
+                <p className="text-slate-500 text-xs leading-relaxed px-1">{checkResult.disclaimer}</p>
 
-                {/* Confidence indicator */}
                 <div className="flex items-center gap-2 px-1">
                   <div className={`w-2 h-2 rounded-full ${checkResult.confidence_gate_passed ? 'bg-[#4A9B8E]' : 'bg-slate-500'}`} />
                   <p className="text-slate-500 text-xs">
@@ -514,20 +740,16 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* AI Chat Interface */}
+        {/* AI Chat */}
         <div className="mt-10">
           <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="text-white font-semibold">Ask the medication assistant</h2>
-              <p className="text-slate-500 text-xs mt-1">
-                Ask about drug classes, adverse effects, interactions, or how medications work.
-                Grounded in verified clinical data.
-              </p>
+              <p className="text-slate-500 text-xs mt-1">Ask about drug classes, adverse effects, interactions, or how medications work.</p>
             </div>
           </div>
 
           <div className="bg-white/5 border border-white/10 rounded-xl overflow-hidden">
-            {/* Chat messages */}
             <div className="h-80 overflow-y-auto p-4 space-y-4" id="chat-messages">
               {chatMessages.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-center px-8">
@@ -537,14 +759,9 @@ export default function DashboardPage() {
                   <p className="text-slate-300 text-sm font-medium mb-2">Ask anything about medications</p>
                   <p className="text-slate-500 text-xs leading-relaxed max-w-sm">
                     Try: "What drug class is amoxicillin?" or "What are the side effects of ibuprofen?"
-                    or "How do ACE inhibitors work?"
                   </p>
                   <div className="flex flex-wrap gap-2 mt-4 justify-center">
-                    {[
-                      'What is amoxicillin used for?',
-                      'How do beta-blockers work?',
-                      'What are NSAIDs?',
-                    ].map((suggestion) => (
+                    {['What is amoxicillin used for?', 'How do beta-blockers work?', 'What are NSAIDs?'].map((suggestion) => (
                       <button
                         key={suggestion}
                         onClick={() => setChatInput(suggestion)}
@@ -589,11 +806,8 @@ export default function DashboardPage() {
               )}
             </div>
 
-            {/* Chat input */}
             <div className="border-t border-white/10 p-4">
-              {chatError && (
-                <p className="text-red-400 text-xs mb-3">{chatError}</p>
-              )}
+              {chatError && <p className="text-red-400 text-xs mb-3">{chatError}</p>}
               <div className="flex gap-3">
                 <input
                   type="text"

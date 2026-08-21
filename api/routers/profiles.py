@@ -1,12 +1,5 @@
 # api/routers/profiles.py
-#
-# PROFILE ENDPOINTS:
-# GET    /api/v1/profiles/          — list own profiles
-# POST   /api/v1/profiles/          — create a new profile
-# GET    /api/v1/profiles/{id}      — get one profile (IDOR protected)
-# PATCH  /api/v1/profiles/{id}      — update a profile (IDOR protected)
-# DELETE /api/v1/profiles/{id}      — delete a profile (IDOR protected)
-#
+
 # NOTE: Sharing endpoints live at /api/v1/sharing/ — separate prefix
 # avoids all route conflicts with /{profile_id}.
 

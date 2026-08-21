@@ -3,6 +3,8 @@ import { useState, useEffect, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+
 function ResetPasswordForm() {
   const searchParams = useSearchParams()
   const router = useRouter()
@@ -28,7 +30,6 @@ function ResetPasswordForm() {
       setError('Passwords do not match.')
       return
     }
-
     if (password.length < 8) {
       setError('Password must be at least 8 characters.')
       return
@@ -37,7 +38,7 @@ function ResetPasswordForm() {
     setLoading(true)
 
     try {
-      const response = await fetch('/api/v1/auth/password-reset/confirm', {
+      const response = await fetch(`${API_BASE}/api/v1/auth/password-reset/confirm`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token, new_password: password }),
@@ -46,7 +47,7 @@ function ResetPasswordForm() {
       const data = await response.json()
 
       if (!response.ok) {
-        setError(data.detail || 'Reset failed. Your link may have expired. Please request a new one.')
+        setError(data.detail || data.message || 'Reset failed. Your link may have expired.')
         return
       }
 
@@ -62,7 +63,6 @@ function ResetPasswordForm() {
   return (
     <div className="min-h-screen bg-[#0F1B2D] flex items-center justify-center px-4">
       <div className="w-full max-w-md">
-        {/* Logo */}
         <div className="flex items-center gap-2 justify-center mb-10">
           <div className="w-8 h-8 bg-[#4A9B8E] rounded-lg flex items-center justify-center">
             <span className="text-white font-bold text-sm">P</span>
@@ -77,16 +77,14 @@ function ResetPasswordForm() {
                 <span className="text-[#4A9B8E] text-2xl">✓</span>
               </div>
               <h1 className="text-xl font-bold text-white mb-2 text-center">Password reset!</h1>
-              <p className="text-slate-400 text-sm text-center leading-relaxed">
+              <p className="text-slate-400 text-sm text-center">
                 Your password has been updated. Redirecting you to sign in...
               </p>
             </>
           ) : (
             <>
               <h1 className="text-2xl font-bold text-white mb-2">Set new password</h1>
-              <p className="text-slate-400 text-sm mb-8">
-                Enter your new password below.
-              </p>
+              <p className="text-slate-400 text-sm mb-8">Enter your new password below.</p>
 
               {error && (
                 <div className="bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-3 mb-6">

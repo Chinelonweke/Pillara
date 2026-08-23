@@ -548,7 +548,20 @@ export default function DashboardPage() {
             {!user.is_verified && (
               <div className="flex items-center gap-2 bg-[#F59E0B]/10 border border-[#F59E0B]/20 rounded-lg px-3 py-1.5">
                 <span className="text-[#F59E0B] text-xs">⚠️ Check your email to verify your account</span>
-              </div>
+                <button
+                 onClick={async () => {
+                   const token = localStorage.getItem('pillara_access_token')
+                   await fetch(`${API_BASE}/api/v1/auth/resend-verification`, {
+                     method: 'POST',
+                     headers: { 'Authorization': `Bearer ${token}` },
+                  })
+                  alert('Verification email sent! Check your inbox.')
+                }}
+                className="text-[#F59E0B] text-xs underline hover:no-underline"
+               >
+                Resend
+               </button>
+             </div>
             )}
             <Link href="/settings" className="text-slate-400 hover:text-white text-sm transition-colors">
               Settings

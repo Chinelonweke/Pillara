@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect, Suspense } from 'react'
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 import { useSearchParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 
@@ -45,7 +46,7 @@ function AcceptInviteForm() {
         return
       }
 
-      const response = await fetch('/api/v1/profiles/accept-invite', {
+      const response = await fetch(`${API_BASE}/api/v1/sharing/accept-invite`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

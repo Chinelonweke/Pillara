@@ -563,6 +563,14 @@ export default function DashboardPage() {
                </button>
              </div>
             )}
+          {profile && (  
+            <Link
+              href={`/reminders?profile_id=${profile?.id}`}
+              className="text-slate-400 hover:text-white text-sm transition-colors"
+           >
+              Reminders
+            </Link>
+          )}
             <Link href="/settings" className="text-slate-400 hover:text-white text-sm transition-colors">
               Settings
             </Link>

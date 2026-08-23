@@ -1,9 +1,4 @@
 # workers/tasks/reminder_task.py
-#
-# RACE CONDITION FIX APPLIED:
-# 1. SELECT FOR UPDATE SKIP LOCKED — multiple workers never process same reminder
-# 2. last_sent_at written FIRST — minimises double-send window on worker crash
-# 3. processing_locked_at cleared after completion — clean state for next run
 
 from monitoring.logger import get_logger
 
@@ -14,6 +9,7 @@ async def process_due_reminders() -> None:
     """
     Fetches and sends all due medication reminders.
     Safe to run from multiple worker processes simultaneously.
+    Uses SELECT FOR UPDATE SKIP LOCKED to prevent double-sends.
     """
     from core.database import AsyncSessionFactory
     from services.reminder_service import ReminderService
@@ -21,8 +17,6 @@ async def process_due_reminders() -> None:
     async with AsyncSessionFactory() as db:
         try:
             service = ReminderService(db=db)
-
-            # SELECT FOR UPDATE SKIP LOCKED — no double processing
             reminders = await service.fetch_due_reminders_with_lock(batch_size=20)
 
             if not reminders:
@@ -44,13 +38,13 @@ async def process_due_reminders() -> None:
 async def _send_reminder(reminder, service, db) -> None:
     """
     Sends one reminder via all configured channels.
-    Writes last_sent_at IMMEDIATELY after sending — before any other work.
+    Writes last_sent_at IMMEDIATELY after sending to prevent double-sends on crash.
     """
-    from models.user import Medication, Profile
+    from models.user import Medication, Profile, User
     from sqlalchemy import select
 
     try:
-        # Fetch medication and profile names for the notification message
+        # Fetch medication details
         med_result = await db.execute(
             select(Medication).where(Medication.id == reminder.medication_id)
         )
@@ -62,30 +56,58 @@ async def _send_reminder(reminder, service, db) -> None:
             await db.flush()
             return
 
+        # Fetch profile and user for notification context
+        profile_result = await db.execute(
+            select(Profile).where(Profile.id == reminder.profile_id)
+        )
+        profile = profile_result.scalar_one_or_none()
+
+        user_email = None
+        profile_name = profile.name if profile else ""
+
+        if profile:
+            user_result = await db.execute(
+                select(User).where(User.id == profile.user_id)
+            )
+            user = user_result.scalar_one_or_none()
+            if user:
+                user_email = user.email
+
         medication_name = medication.name
         dosage = medication.dosage or ""
-        message = f"Time to take your {medication_name}"
-        if dosage:
-            message += f" ({dosage})"
 
         send_errors = []
 
-        # Send via each configured channel
-        if reminder.notify_push:
+        # Email notification
+        if reminder.notify_email and user_email:
             try:
-                await _send_push_notification(reminder=reminder, message=message)
-            except Exception as e:
-                send_errors.append(f"push: {e}")
-
-        if reminder.notify_email:
-            try:
-                await _send_email_notification(reminder=reminder, message=message)
+                await _send_email_notification(
+                    to_email=user_email,
+                    medication_name=medication_name,
+                    dosage=dosage,
+                    profile_name=profile_name,
+                )
             except Exception as e:
                 send_errors.append(f"email: {e}")
 
-        if reminder.notify_sms:
+        # Push notification (stub — implement with pywebpush post-launch)
+        if reminder.notify_push:
             try:
-                await _send_sms_notification(reminder=reminder, message=message)
+                await _send_push_notification(
+                    reminder=reminder,
+                    medication_name=medication_name,
+                    dosage=dosage,
+                )
+            except Exception as e:
+                send_errors.append(f"push: {e}")
+
+        # SMS notification (stub — implement with Africa's Talking post-launch)
+        if reminder.notify_sms and user_email:
+            try:
+                await _send_sms_notification(
+                    reminder=reminder,
+                    medication_name=medication_name,
+                )
             except Exception as e:
                 send_errors.append(f"sms: {e}")
 
@@ -97,33 +119,56 @@ async def _send_reminder(reminder, service, db) -> None:
             )
 
         # CRITICAL: Write last_sent_at IMMEDIATELY after sending.
-        # If we crash after this line, the next worker sees last_sent_at is set
-        # and skips the reminder. Near-zero double-sends.
+        # If worker crashes after this line, the next run sees last_sent_at
+        # and skips this reminder. Prevents double-sends.
         await service.mark_reminder_sent(reminder)
 
-        logger.info("reminder_sent", reminder_id=reminder.id)
+        logger.info(
+            "reminder_sent",
+            reminder_id=reminder.id,
+            medication=medication_name,
+            channels_attempted=["email" if reminder.notify_email else None,
+                                 "push" if reminder.notify_push else None],
+        )
 
     except Exception as error:
         logger.error("reminder_send_failed", reminder_id=reminder.id, error=str(error))
-        # Release the lock so it can be retried
+        # Release the processing lock so it can be retried next minute
         reminder.processing_locked_at = None
         await db.flush()
 
 
-async def _send_push_notification(reminder, message: str) -> None:
-    """Sends a Web Push notification."""
-    # TODO: implement with pywebpush
-    # Requires VAPID keys and the user's push subscription endpoint
-    logger.debug("push_notification_sent", reminder_id=reminder.id)
+async def _send_email_notification(
+    to_email: str,
+    medication_name: str,
+    dosage: str,
+    profile_name: str,
+) -> None:
+    """Sends a branded medication reminder email via Resend."""
+    from services.email_service import send_reminder_email
+    success = await send_reminder_email(
+        to_email=to_email,
+        medication_name=medication_name,
+        dosage=dosage,
+        profile_name=profile_name,
+    )
+    if not success:
+        raise RuntimeError(f"send_reminder_email returned False for {to_email}")
 
 
-async def _send_email_notification(reminder, message: str) -> None:
-    """Sends an email reminder via Resend."""
-    # TODO: implement with resend SDK
-    logger.debug("email_notification_sent", reminder_id=reminder.id)
+async def _send_push_notification(reminder, medication_name: str, dosage: str) -> None:
+    """
+    Web Push notification — not yet implemented.
+    Requires VAPID keys and user's push subscription stored in database.
+    Implement post-launch with pywebpush library.
+    """
+    logger.debug("push_notification_stub", reminder_id=reminder.id, medication=medication_name)
 
 
-async def _send_sms_notification(reminder, message: str) -> None:
-    """Sends an SMS via Africa's Talking."""
-    # TODO: implement with africastalking SDK
-    logger.debug("sms_notification_sent", reminder_id=reminder.id)
+async def _send_sms_notification(reminder, medication_name: str) -> None:
+    """
+    SMS via Africa's Talking — not yet implemented.
+    Best delivery channel for Nigerian users without smartphones.
+    Implement post-launch with africastalking library.
+    """
+    logger.debug("sms_notification_stub", reminder_id=reminder.id, medication=medication_name)

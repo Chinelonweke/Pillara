@@ -21,7 +21,7 @@ from api.dependencies import (
 from core.config import settings
 from core.exceptions import InvalidAudioError
 from core.security import sanitize_for_llm, strip_llm_output_html
-from schemas.all_schemas import AIQueryRequest, AIQueryResponse, VoiceQueryResponse
+from schemas.all_schemas import AIQueryRequest, AIQueryResponse, VoiceQueryResponse, SuccessResponse
 from monitoring.logger import get_logger
 
 logger = get_logger(__name__)

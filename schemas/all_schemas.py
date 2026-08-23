@@ -223,6 +223,8 @@ class AIQueryRequest(BaseModel):
     @field_validator("query")
     @classmethod
     def validate_query(cls, query: str) -> str:
+        if len(query) > 2000:
+            raise ValueError("Query cannot exceed 2000 characters")
         from core.security import sanitize_for_llm
         sanitized = sanitize_for_llm(query)
         if not sanitized:

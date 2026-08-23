@@ -155,3 +155,6 @@ mypy==1.13.0                    # static type checker
 colorama==0.4.6                 # coloured terminal output on Windows
 pywin32==308; sys_platform=="win32"  # Windows-specific utilities
                                      # sys_platform condition = only installs on Windows
+prometheus-fastapi-instrumentator==6.1.0
+posthog==3.5.0
+starlette==0.41.3

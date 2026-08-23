@@ -438,7 +438,8 @@ class RAGPipeline:
         )
 
         # ── STEP 11: Strip HTML from LLM output (XSS prevention) ────────
-        safe_response_text = self._strip_output_html(llm_result["text"])
+        clean_text = self._strip_thinking_chain(llm_result["text"])
+        safe_response_text = self._strip_output_html(clean_text)
 
         # ── Log Retrieval for Observability ──────────────────────────────
         # This is what lets you debug hallucinations systematically
@@ -735,9 +736,10 @@ class RAGPipeline:
         try:
             from sentence_transformers import CrossEncoder
 
-            # Load the cross-encoder model
-            # WHY THIS MODEL: small, fast, good at passage ranking
-            model = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+# Cache at class level — loading fresh every request adds 10-15 seconds overhead
+            if not hasattr(RAGPipeline, '_cross_encoder'):
+                RAGPipeline._cross_encoder = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+            model = RAGPipeline._cross_encoder
 
             # Create (query, chunk_text) pairs for the cross-encoder
             # The cross-encoder needs BOTH texts together to score them
@@ -990,6 +992,17 @@ Relevance Score: {chunk.final_score:.3f}
                         )
                 except (ValueError, TypeError):
                     pass  # If we can't parse the date, we can't check staleness
+
+    def _strip_thinking_chain(self, text: str) -> str:
+        """Strips internal reasoning from thinking models (Qwen, DeepSeek-R1)."""
+        text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+        separators = [r'\n---+\n', r'\nAnswer:\s*\n', r'\nFinal Answer:\s*\n']
+        for pattern in separators:
+            parts = re.split(pattern, text, maxsplit=1)
+            if len(parts) == 2 and len(parts[0]) > 200:
+                text = parts[1].strip()
+                break
+        return text.strip()
 
     def _strip_output_html(self, text: str) -> str:
         """

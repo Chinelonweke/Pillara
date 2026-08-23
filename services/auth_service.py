@@ -110,6 +110,9 @@ class AuthService:
 
         logger.info("user_registered", user_id=new_user.id, request_id=request_id)
 
+        from monitoring.analytics import track
+        track("user_registered", user_id=str(new_user.id))
+
         return TokenResponse(
             access_token=access_token,
             refresh_token=refresh_token,

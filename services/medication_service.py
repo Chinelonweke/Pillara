@@ -114,6 +114,9 @@ class MedicationService:
             request_id=request_id,
         )
         logger.info("medication_added", user_id=user_id, profile_id=profile_id, medication_id=medication.id)
+
+        from monitoring.analytics import track
+        track("medication_added", user_id=str(user_id), properties={"profile_id": str(profile_id)})
         return medication
 
     async def update_medication(self, medication_id: str, user_id: str, update_data: MedicationUpdate, request_id: str = "unknown") -> Medication:

@@ -25,7 +25,7 @@ async def _keep_neondb_awake() -> None:
     from core.database import AsyncSessionFactory
 
     while True:
-        await asyncio.sleep(240)  # 4 minutes
+        await asyncio.sleep(240)
         try:
             async with AsyncSessionFactory() as db:
                 await db.execute(text("SELECT 1"))
@@ -78,6 +78,16 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization", "X-Request-ID"],
 )
+
+# Prometheus metrics — auto-instruments all FastAPI endpoints
+try:
+    from prometheus_fastapi_instrumentator import Instrumentator
+    Instrumentator(
+        should_group_status_codes=True,
+        excluded_handlers=["/health", "/metrics", "/"],
+    ).instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
+except ImportError:
+    logger.warning("prometheus_instrumentator_not_installed")
 
 try:
     from api.routers import auth, medications, interactions, ai_chat, reminders, profiles, reports, sharing

@@ -130,6 +130,12 @@ async def check_interactions(
         request_id=request_id,
     )
 
+    from monitoring.analytics import track
+    track("interaction_checked", user_id=str(current_user.id), properties={
+    "drug_count": len(all_drugs),
+    "allergy_warnings": len(allergy_warnings),
+    })
+
     # ── STEP 4: Audit log ──────────────────────────────────────────────────────
     await audit.log(
         event_type=AuditEventType.INTERACTION_CHECKED,

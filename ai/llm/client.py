@@ -26,8 +26,8 @@ PROVIDER_CONFIGS: list = [
         "base_url": "https://api.groq.com/openai/v1",
         "api_key_setting": "GROQ_API_KEY",
         "models": {
-            QueryComplexity.COMPLEX: "llama-3.3-70b-versatile",
-            QueryComplexity.SIMPLE:  "llama-3.1-8b-instant",
+            QueryComplexity.COMPLEX: "openai/gpt-oss-20b",
+            QueryComplexity.SIMPLE:  "openai/gpt-oss-20b",
         },
         "timeout_seconds": 8,
         "extra_headers": {},
@@ -51,10 +51,10 @@ PROVIDER_CONFIGS: list = [
         "api_key_setting": "OPENROUTER_API_KEY",
         "models": {
             QueryComplexity.COMPLEX: [
-                "meta-llama/llama-3.3-70b-instruct:free",
                 "meta-llama/llama-3.1-8b-instruct:free",
                 "mistralai/mistral-7b-instruct:free",
                 "google/gemma-3-27b-it:free",
+                "qwen/qwen-2-7b-instruct:free",
             ],
             QueryComplexity.SIMPLE: [
                 "meta-llama/llama-3.1-8b-instruct:free",

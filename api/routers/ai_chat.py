@@ -276,3 +276,38 @@ async def voice_query(
             os.unlink(temp_path)
         except Exception:
             pass
+
+    @router.post(
+    "/feedback",
+    response_model=SuccessResponse,
+    summary="Submit feedback on an AI response",
+)
+    async def submit_feedback(
+    body: dict,
+    current_user: CurrentUser,
+    db: DBSession,
+    ) -> SuccessResponse:
+       """
+    Records thumbs up/down feedback on AI responses.
+    Used to track helpful_rate — the primary AI quality metric.
+    """
+    from monitoring.analytics import track
+    from monitoring.logger import get_logger
+
+    logger = get_logger(__name__)
+    rating = body.get("rating", "unknown")
+    conversation_id = body.get("conversation_id", "unknown")
+
+    track("ai_feedback", user_id=str(current_user.id), properties={
+        "rating": rating,
+        "conversation_id": conversation_id,
+    })
+
+    logger.info(
+        "ai_feedback_received",
+        user_id=current_user.id,
+        rating=rating,
+        conversation_id=conversation_id,
+    )
+
+    return SuccessResponse(message="Feedback recorded. Thank you.")

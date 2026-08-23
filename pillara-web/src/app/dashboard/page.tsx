@@ -317,6 +317,7 @@ export default function DashboardPage() {
   const [chatLoading, setChatLoading] = useState(false)
   const [chatError, setChatError] = useState('')
   const [conversationId, setConversationId] = useState<string | undefined>(undefined)
+  const [feedbackGiven, setFeedbackGiven] = useState<Record<number, 'helpful' | 'unhelpful'>>({})
 
   useEffect(() => {
     if (!authLoading && !user) router.push('/login')
@@ -418,6 +419,20 @@ export default function DashboardPage() {
   const handleLogout = async () => {
     await logout()
     router.push('/')
+  }
+
+  const handleFeedback = async (messageIndex: number, rating: 'helpful' | 'unhelpful') => {
+    setFeedbackGiven(prev => ({ ...prev, [messageIndex]: rating }))
+    try {
+      const token = localStorage.getItem('pillara_access_token')
+      await fetch(`${API_BASE}/api/v1/ai/feedback`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversation_id: conversationId, rating }),
+      })
+    } catch {
+      // Feedback failure is non-critical — never show error to user
+    }
   }
 
   const handleChatSend = async () => {
@@ -549,28 +564,26 @@ export default function DashboardPage() {
               <div className="flex items-center gap-2 bg-[#F59E0B]/10 border border-[#F59E0B]/20 rounded-lg px-3 py-1.5">
                 <span className="text-[#F59E0B] text-xs">⚠️ Check your email to verify your account</span>
                 <button
-                 onClick={async () => {
-                   const token = localStorage.getItem('pillara_access_token')
-                   await fetch(`${API_BASE}/api/v1/auth/resend-verification`, {
-                     method: 'POST',
-                     headers: { 'Authorization': `Bearer ${token}` },
-                  })
-                  alert('Verification email sent! Check your inbox.')
-                }}
-                className="text-[#F59E0B] text-xs underline hover:no-underline"
-               >
-                Resend
-               </button>
-             </div>
+                  onClick={async () => {
+                    const token = localStorage.getItem('pillara_access_token')
+                    await fetch(`${API_BASE}/api/v1/auth/resend-verification`, {
+                      method: 'POST',
+                      headers: { 'Authorization': `Bearer ${token}` },
+                    })
+                    alert('Verification email sent! Check your inbox.')
+                  }}
+                  className="text-[#F59E0B] text-xs underline hover:no-underline"
+                >
+                  Resend
+                </button>
+              </div>
             )}
-          {profile && (  
             <Link
               href={`/reminders?profile_id=${profile?.id}`}
               className="text-slate-400 hover:text-white text-sm transition-colors"
-           >
+            >
               Reminders
             </Link>
-          )}
             <Link href="/settings" className="text-slate-400 hover:text-white text-sm transition-colors">
               Settings
             </Link>
@@ -801,6 +814,7 @@ export default function DashboardPage() {
                         <span className="text-white text-xs font-bold">P</span>
                       </div>
                     )}
+                    <div className="flex flex-col gap-1">
                     <div className={`max-w-[75%] rounded-2xl px-4 py-3 ${
                       msg.role === 'user'
                         ? 'bg-[#4A9B8E] text-white rounded-tr-sm'
@@ -808,6 +822,33 @@ export default function DashboardPage() {
                     }`}>
                       <p className="text-sm leading-relaxed">{stripMarkdown(msg.content)}</p>
                     </div>
+                    {msg.role === 'assistant' && (
+                      <div className="flex items-center gap-2 ml-1">
+                        {feedbackGiven[i] ? (
+                          <span className="text-xs text-slate-500">
+                            {feedbackGiven[i] === 'helpful' ? '👍 Thanks!' : '👎 Noted'}
+                          </span>
+                        ) : (
+                          <>
+                            <button
+                              onClick={() => handleFeedback(i, 'helpful')}
+                              className="text-slate-500 hover:text-green-400 text-xs transition-colors"
+                              title="Helpful"
+                            >
+                              👍
+                            </button>
+                            <button
+                              onClick={() => handleFeedback(i, 'unhelpful')}
+                              className="text-slate-500 hover:text-red-400 text-xs transition-colors"
+                              title="Not helpful"
+                            >
+                              👎
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
                   </div>
                 ))
               )}

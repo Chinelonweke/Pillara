@@ -79,6 +79,7 @@ class Settings(BaseSettings):
     RESEND_API_KEY: Optional[str] = None
     FROM_EMAIL: str = "noreply@pillara.site"
     ALERT_EMAIL: str = "nwekechinelo25@yahoo.com"
+    ALERT_FROM_EMAIL: str = "alerts@pillara.site"
     FRONTEND_URL: str = "http://localhost:3000"
     VAPID_PUBLIC_KEY: Optional[str] = None
     VAPID_PRIVATE_KEY: Optional[str] = None

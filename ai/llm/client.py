@@ -249,7 +249,7 @@ class LLMClient:
                     "https://api.resend.com/emails",
                     headers={"Authorization": f"Bearer {settings.RESEND_API_KEY}", "Content-Type": "application/json"},
                     json={
-                        "from": "alerts@pillara.site",
+                        "from": settings.ALERT_FROM_EMAIL,
                         "to": ["nwekechinelo25@yahoo.com"],
                         "subject": "🚨 Pillara — All AI Providers Down",
                         "html": f"<h2>🚨 PILLARA CRITICAL ALERT</h2><p>{message}</p>"

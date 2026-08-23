@@ -261,3 +261,25 @@ async def get_me(current_user: CurrentUser) -> dict:
         # (e.g., account settings page — add a dedicated endpoint for that).
         # Minimise PHI surface area in API responses.
     }
+
+@router.post(
+    "/resend-verification",
+    response_model=SuccessResponse,
+    summary="Resend verification email",
+)
+async def resend_verification(
+    current_user: CurrentUser,
+    db: DBSession,
+) -> SuccessResponse:
+    if current_user.is_verified:
+        return SuccessResponse(message="Your email is already verified.")
+
+    if not current_user.verification_token:
+        return SuccessResponse(message="No verification pending. Please contact support.")
+
+    from services.email_service import send_verification_email
+    await send_verification_email(
+        to_email=current_user.email,
+        verification_token=current_user.verification_token,
+    )
+    return SuccessResponse(message="Verification email sent. Please check your inbox.")

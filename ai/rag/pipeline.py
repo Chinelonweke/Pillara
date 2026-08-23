@@ -772,7 +772,7 @@ class RAGPipeline:
         except Exception as error:
             # If cross-encoder fails (model not loaded, etc.)
             # fall back to the RRF-ranked results
-            logger.warning("reranking_failed", error=str(error))
+            logger.error("reranking_failed", error=str(error))
             return chunks[:top_k]
 
     def _build_metadata_filter(

@@ -1,5 +1,7 @@
 # api/routers/interactions.py
 
+import json
+
 from fastapi import APIRouter, Depends, Request
 
 from api.dependencies import (
@@ -26,24 +28,6 @@ async def check_interactions(
     db: DBSession,
     redis: RedisClient,
 ) -> InteractionCheckResponse:
-    """
-    Checks for interactions between two or more drugs, AND checks all
-    drugs against the patient's documented allergies.
-
-    SAFETY DESIGN:
-    - Minimum 2 drugs, maximum 10 drugs per request
-    - Allergy check runs FIRST, deterministically, before the LLM —
-      known cross-reactivity is not a probabilistic judgment
-    - Confidence gate: if retrieved data score < 0.75, returns safe fallback
-    - Never guesses on drug interactions — says "I don't have verified data"
-    - Audit logged every call (HIPAA: track all PHI access)
-    - Nothing fails silently: all errors logged at ERROR level with
-      request_id for Sentry/log correlation
-
-    IDOR: profile_id (optional) is verified against current_user before
-    fetching profile medications and allergies. Foreign profile_id returns
-    empty context, not an error — no information leakage.
-    """
     from ai.rag.pipeline import RAGPipeline
     from ai.llm.prompts import build_interaction_prompt
     from ai.llm.client import LLMClient, QueryComplexity
@@ -58,27 +42,24 @@ async def check_interactions(
 
     # Sanitize all drug names
     sanitized_drugs = [sanitize_medication_name(name) for name in body.drug_names]
-    sanitized_drugs = [d for d in sanitized_drugs if d]  # remove empty strings
+    sanitized_drugs = [d for d in sanitized_drugs if d]
 
-    # ── STEP 1: Resolve profile context ────────────────────────────────────────
-    # If profile_id provided, fetch:
-    # (a) profile's existing medications (add to drug list for interaction check)
-    # (b) profile's known allergies (for deterministic allergy cross-check)
-    #
-    # WHY SEPARATE IDOR vs REAL ERROR HANDLING:
-    # The previous code used `except Exception: pass` for everything —
-    # meaning a real database error (transient connection drop, etc.) was
-    # silently swallowed exactly the same as a legitimate IDOR attempt.
-    # This means a real error during medication or allergy lookup could
-    # cause the check to run with incomplete context, with no one knowing.
-    #
-    # Correct behavior:
-    # - IDOR attempt (profile exists but belongs to someone else) →
-    #   ProfileNotFoundError → log at INFO, continue with empty context
-    # - Real error (DB down, unexpected exception) →
-    #   log at ERROR with full context, continue with empty context
-    # Both degrade gracefully, but only real errors surface to monitoring.
+    # ── CACHE CHECK ────────────────────────────────────────────────────────────
+    # Identical drug combinations always produce the same interaction result.
+    # Sorted key means ["aspirin","ibuprofen"] == ["ibuprofen","aspirin"].
+    # Only cache requests without a profile_id — profile-specific requests
+    # include patient medications and allergy data which vary per patient.
+    cache_key = "interaction:" + ":".join(sorted(d.lower() for d in sanitized_drugs))
+    if not body.profile_id:
+        try:
+            cached = await redis.get(cache_key)
+            if cached:
+                logger.info("interaction_cache_hit", drugs=sanitized_drugs)
+                return InteractionCheckResponse(**json.loads(cached))
+        except Exception:
+            pass  # Cache miss or Redis error — proceed normally
 
+    # ── STEP 1: Resolve profile context ───────────────────────────────────────
     all_drugs = list(sanitized_drugs)
     known_allergies: str = ""
 
@@ -92,7 +73,6 @@ async def check_interactions(
             )
             known_allergies = profile.known_allergies or ""
 
-            # Add profile's existing medications to the drug list
             med_service = MedicationService(db=db)
             medications = await med_service.list_medications(
                 profile_id=body.profile_id,
@@ -111,18 +91,12 @@ async def check_interactions(
         except Exception as profile_error:
             from core.exceptions import NotFoundError
             if isinstance(profile_error, NotFoundError):
-                # Legitimate IDOR attempt or profile genuinely not found —
-                # log at INFO (expected, no action needed), continue without
-                # profile context. Do NOT leak whether profile exists.
                 logger.info(
                     "interaction_check_profile_not_found",
                     profile_id=body.profile_id,
                     request_id=request_id,
                 )
             else:
-                # Real error — log at ERROR level so it surfaces in monitoring
-                # (Sentry once wired, structured log in the meantime).
-                # We continue rather than crash, but this needs to be visible.
                 logger.error(
                     "interaction_check_profile_fetch_failed",
                     error=str(profile_error),
@@ -131,12 +105,7 @@ async def check_interactions(
                     request_id=request_id,
                 )
 
-    # ── STEP 2: Deterministic allergy cross-check ───────────────────────────────
-    # Runs BEFORE the LLM pipeline — known cross-reactivity is a factual
-    # lookup, not a judgment call. Results are included regardless of
-    # whether the LLM/RAG pipeline returns high confidence or not.
-    # redis is passed through to enable RxNorm/MedRT fallback for drugs
-    # not in the local map — cached permanently in Redis on first lookup.
+    # ── STEP 2: Deterministic allergy cross-check ──────────────────────────────
     allergy_warnings = await check_allergies(
         drug_names=all_drugs,
         known_allergies_str=known_allergies,
@@ -152,7 +121,7 @@ async def check_interactions(
             request_id=request_id,
         )
 
-    # ── STEP 3: LLM/RAG pipeline for drug-drug interaction data ────────────────
+    # ── STEP 3: LLM/RAG pipeline ───────────────────────────────────────────────
     pipeline = RAGPipeline(redis=redis)
     interaction_query = f"drug interactions between {' and '.join(all_drugs)}"
 
@@ -161,7 +130,7 @@ async def check_interactions(
         request_id=request_id,
     )
 
-    # ── STEP 4: Audit log ───────────────────────────────────────────────────────
+    # ── STEP 4: Audit log ──────────────────────────────────────────────────────
     await audit.log(
         event_type=AuditEventType.INTERACTION_CHECKED,
         outcome=AuditOutcome.SUCCESS,
@@ -176,10 +145,8 @@ async def check_interactions(
         },
     )
 
-    # ── STEP 5: Determine overall risk ─────────────────────────────────────────
-    # If any allergy warning exists, overall risk is always at least "high"
-    # regardless of what the LLM pipeline returned — a known allergy
-    # cross-reactivity is never downgraded by an uncertain LLM response.
+    # ── STEP 5: Determine overall risk ────────────────────────────────────────
+    # Allergy warnings always take priority — never downgraded by LLM output
     response_lower = result.response_text.lower()
     if allergy_warnings:
         overall_risk = "high"
@@ -194,9 +161,10 @@ async def check_interactions(
     else:
         overall_risk = "none"
 
-    return InteractionCheckResponse(
+    # ── STEP 6: Build response and cache ──────────────────────────────────────
+    response_data = InteractionCheckResponse(
         drugs_checked=all_drugs,
-        interactions_found=[],  # Parsed from LLM response in a future iteration
+        interactions_found=[],
         allergy_warnings=allergy_warnings,
         overall_risk=overall_risk,
         summary=result.response_text,
@@ -205,3 +173,12 @@ async def check_interactions(
         provider_used=result.provider_used,
         latency_ms=result.latency_ms,
     )
+
+    # Cache only non-profile requests — profile results include patient-specific data
+    if not body.profile_id and not allergy_warnings:
+        try:
+            await redis.setex(cache_key, 86400, json.dumps(response_data.model_dump()))
+        except Exception:
+            pass
+
+    return response_data

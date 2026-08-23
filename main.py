@@ -1,4 +1,5 @@
 # main.py
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, status
@@ -19,6 +20,19 @@ logger = get_logger(__name__)
 init_sentry()
 
 
+async def _keep_neondb_awake() -> None:
+    from sqlalchemy import text
+    from core.database import AsyncSessionFactory
+
+    while True:
+        await asyncio.sleep(240)  # 4 minutes
+        try:
+            async with AsyncSessionFactory() as db:
+                await db.execute(text("SELECT 1"))
+        except Exception as error:
+            logger.warning("neondb_keepalive_failed", error=str(error))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("pillara_starting", version=settings.APP_VERSION, environment=settings.ENVIRONMENT)
@@ -30,6 +44,8 @@ async def lifespan(app: FastAPI):
         await init_chromadb_with_retry()
     except RuntimeError as error:
         logger.warning("chromadb_unavailable_at_startup", error=str(error))
+
+    asyncio.create_task(_keep_neondb_awake())
 
     logger.info("pillara_ready", version=settings.APP_VERSION)
     yield
@@ -75,7 +91,7 @@ try:
     app.include_router(reports.router, prefix="/api/v1/reports", tags=["Reports"])
 except Exception as import_error:
     logger.error("routers_failed_to_load", error=str(import_error), error_type=type(import_error).__name__)
-    raise  # re-raise so startup fails loudly instead of silently
+    raise
 
 
 @app.exception_handler(PillaraError)
@@ -131,7 +147,13 @@ async def health_check() -> dict:
             settings=ChromaSettings(anonymized_telemetry=False),
         )
         chroma_client.heartbeat()
-        chroma_status = "healthy"
+        collection = chroma_client.get_collection(settings.CHROMA_COLLECTION_NAME)
+        doc_count = collection.count()
+        if doc_count < 50:
+            chroma_status = f"degraded — only {doc_count} documents in collection"
+            logger.warning("chromadb_low_document_count", doc_count=doc_count)
+        else:
+            chroma_status = f"healthy ({doc_count} documents)"
     except Exception as e:
         chroma_status = f"unhealthy: {type(e).__name__}"
 
@@ -140,7 +162,10 @@ async def health_check() -> dict:
         "redis": redis_status,
         "chromadb": chroma_status,
     }
-    all_healthy = all(v == "healthy" for v in services.values())
+    all_healthy = all(
+        v == "healthy" or v.startswith("healthy")
+        for v in services.values()
+    )
 
     return {
         "status": "healthy" if all_healthy else "degraded",

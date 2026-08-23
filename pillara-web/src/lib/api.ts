@@ -63,14 +63,7 @@ async function apiFetch<T>(path: string, options: FetchOptions = {}): Promise<T>
 
   const data = await response.json()
 
-  if (!response.ok) {
-    // WHY AUTO-REDIRECT ON 401:
-    // A 401 during a normal session means the JWT expired (30 min window).
-    // Showing a raw error message in the UI is confusing — the user didn't
-    // do anything wrong. The right behavior is to clear the stale token,
-    // redirect to login, and let them sign in with a fresh token.
-    // We check the error code specifically to avoid redirecting on other
-    // 401 cases (e.g. wrong password on the login page itself).
+    if (!response.ok) {
     if (
       response.status === 401 &&
       data.error === 'authentication_required' &&
@@ -78,6 +71,33 @@ async function apiFetch<T>(path: string, options: FetchOptions = {}): Promise<T>
       !window.location.pathname.includes('/login') &&
       !window.location.pathname.includes('/register')
     ) {
+      // Try silent token refresh before logging out
+      const refreshToken = localStorage.getItem('pillara_refresh_token')
+      if (refreshToken) {
+        try {
+          const refreshRes = await fetch(`${API_BASE}/api/v1/auth/refresh`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ refresh_token: refreshToken }),
+          })
+          if (refreshRes.ok) {
+            const refreshData = await refreshRes.json()
+            setTokens(refreshData.access_token, refreshData.refresh_token)
+            const retryHeaders: Record<string, string> = {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${refreshData.access_token}`,
+            }
+            const retryRes = await fetch(`${API_BASE}${path}`, {
+              method,
+              headers: retryHeaders,
+              body: body ? JSON.stringify(body) : undefined,
+            })
+            if (retryRes.ok) return retryRes.json() as T
+          }
+        } catch {
+          // Refresh failed — fall through to logout
+        }
+      }
       clearTokens()
       window.location.href = '/login'
       throw new APIError(401, 'authentication_required', 'Session expired. Please sign in again.')

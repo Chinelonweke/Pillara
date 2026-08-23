@@ -83,7 +83,7 @@ alembic upgrade head
 ### 5. Seed drug knowledge base
 
 ```bash
-python scripts/seed_drug_knowledge.py
+python scripts/seed_drug_data.py
 ```
 
 Embeds 541 drug knowledge chunks into ChromaDB. Only needed once — data persists in the Docker volume.
@@ -238,7 +238,7 @@ GET  /metrics
 **Required steps on first deployment:**
 ```bash
 alembic upgrade head                    # run migrations on production NeonDB
-python scripts/seed_drug_knowledge.py   # seed ChromaDB with drug knowledge
+python scripts/seed_drug_data.py   # seed ChromaDB with drug knowledge
 ```
 
 ---

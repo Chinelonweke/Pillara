@@ -1,36 +1,5 @@
 # ai/llm/prompts.py
-#
-# WHY THIS FILE EXISTS:
-# System prompts are the instructions we give the AI before every conversation.
-# They define WHO the AI is, WHAT it can do, and WHAT it must never do.
-#
-# WHY PROMPTS ARE A SECURITY DOCUMENT:
-# A weak system prompt means a user can type "ignore your instructions"
-# and the AI will comply. Every rule in these prompts is a security boundary.
-#
-# WHY PROMPTS ARE ALSO A CLINICAL SAFETY DOCUMENT:
-# In healthcare, an AI that gives wrong medical advice is not just
-# a bad UX — it is a patient safety risk. Every constraint here
-# exists to prevent a harmful outcome.
-#
-# STRUCTURE:
-# BASE_SYSTEM_PROMPT     → applied to all interactions
-# DRUG_INTERACTION_PROMPT → applied to interaction checks
-# MEDICATION_INFO_PROMPT  → applied to general medication questions
-# HEALTH_INSIGHTS_PROMPT  → applied to personalised health tips
-# VOICE_RESPONSE_PROMPT   → applied when responding via voice (TTS)
 
-
-# ─── BASE SYSTEM PROMPT ───────────────────────────────────────────────────────
-#
-# This is injected into EVERY AI conversation in Pillara.
-# It establishes the AI's identity, capabilities, and hard limits.
-#
-# WHY SO EXPLICIT:
-# LLMs will do what they're asked unless explicitly told not to.
-# Each rule here exists because without it, the AI would (or could) do
-# something harmful: guess when it doesn't know, give lethal dose info,
-# follow a user's "new instructions", etc.
 
 BASE_SYSTEM_PROMPT = """
 You are Pillara's AI medication assistant — a knowledgeable, warm, and careful 
@@ -166,6 +135,14 @@ CONFIDENCE NOTE:
 If the retrieved context has a confidence score below 0.75, you will not receive 
 this prompt — a safe fallback message will be returned instead.
 This ensures you only answer when verified information is available.
+
+REQUIRED FINAL LINE:
+Always end your response with exactly this format on its own line:
+RISK_LEVEL: high
+or RISK_LEVEL: moderate
+or RISK_LEVEL: low  
+or RISK_LEVEL: none
+Choose the one that matches the most severe interaction you found.
 """
 
 
@@ -308,6 +285,7 @@ def build_interaction_prompt(
         prompt = prompt + "\n\n" + VOICE_RESPONSE_PROMPT
 
     return prompt
+
 
 
 def build_medication_info_prompt(

@@ -151,21 +151,29 @@ async def check_interactions(
         },
     )
 
-    # ── STEP 5: Determine overall risk ────────────────────────────────────────
-    # Allergy warnings always take priority — never downgraded by LLM output
-    response_lower = result.response_text.lower()
+        # ── STEP 5: Determine overall risk ────────────────────────────────────────
+    # Allergy warnings are deterministic — always highest priority.
+    # For LLM risk: extract structured RISK_LEVEL tag from response.
+    # Substring matching is negation-blind ("not high risk" matches "high").
+    import re
     if allergy_warnings:
         overall_risk = "high"
-    elif "high" in response_lower and ("risk" in response_lower or "avoid" in response_lower):
-        overall_risk = "high"
-    elif "moderate" in response_lower:
-        overall_risk = "moderate"
-    elif "low" in response_lower or "minor" in response_lower:
-        overall_risk = "low"
     elif not result.confidence_gate_passed:
         overall_risk = "unknown"
     else:
-        overall_risk = "none"
+        risk_match = re.search(
+            r'RISK_LEVEL:\s*(high|moderate|low|none)',
+            result.response_text,
+            re.IGNORECASE,
+        )
+        if risk_match:
+            overall_risk = risk_match.group(1).lower()
+        else:
+            overall_risk = "unknown"
+            logger.warning(
+                "risk_level_not_found_in_response",
+                response_preview=result.response_text[:100],
+            )
 
     # ── STEP 6: Build response and cache ──────────────────────────────────────
     response_data = InteractionCheckResponse(

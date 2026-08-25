@@ -93,8 +93,9 @@ class SessionManager:
         try:
             exists = await self.redis.exists(key)
             return bool(exists)
-        except RedisError:
-            return True  # fail open — JWT signature still provides auth
+        except RedisError as error:
+            logger.error("session_verify_redis_error", error=str(error), user_id=user_id)
+            return False  # fail closed — healthcare app must not bypass session revocation
 
     async def revoke_session(self, user_id: str, jti: str) -> bool:
         key = self._session_key(user_id, jti)

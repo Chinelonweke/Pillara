@@ -183,7 +183,10 @@ class InteractionCheckRequest(BaseModel):
             raise ValueError("Provide at least 2 drug names to check interactions")
         if len(drug_names) > 10:
             raise ValueError("Can check maximum 10 drugs at once")
-        return [name.strip().lower() for name in drug_names]
+        cleaned = [name.strip().lower() for name in drug_names]
+        if len(set(cleaned)) < 2:
+            raise ValueError("Provide at least 2 distinct drug names — duplicates do not constitute an interaction")
+        return cleaned
 
 
 class InteractionResult(BaseModel):

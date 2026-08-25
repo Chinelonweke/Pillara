@@ -1,7 +1,5 @@
 'use client'
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
-import { useAuth } from '@/lib/auth-context'
 import { profiles, APIError } from '@/lib/api'
 
 // Common allergies for quick-select chips
@@ -18,8 +16,7 @@ const COMMON_CONDITIONS = [
 ]
 
 export default function OnboardingPage() {
-  const { user } = useAuth()
-  const router = useRouter()
+  
 
   const [step, setStep] = useState(1) // 2-step flow
   const [loading, setLoading] = useState(false)

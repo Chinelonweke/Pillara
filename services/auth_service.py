@@ -292,7 +292,7 @@ class AuthService:
         if self.redis:
             from core.redis_client import SessionManager
             session_manager = SessionManager(self.redis)
-            await session_manager.revoke_session(user_id=user_id, jti=payload.get("access_jti", ""))
+            await session_manager.revoke_all_sessions(user_id=user_id)
             await session_manager.create_session(user_id=user_id, jti=access_payload["jti"])
 
         await self.audit.log(

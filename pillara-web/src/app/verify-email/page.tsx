@@ -1,10 +1,10 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { auth, APIError } from '@/lib/api'
 
-export default function VerifyEmailPage() {
+function VerifyEmailContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const token = searchParams.get('token')
@@ -22,7 +22,6 @@ export default function VerifyEmailPage() {
     auth.verifyEmail(token)
       .then(() => {
         setStatus('success')
-        // Redirect to dashboard after 2 seconds
         setTimeout(() => router.push('/dashboard'), 2000)
       })
       .catch((err) => {
@@ -86,5 +85,17 @@ export default function VerifyEmailPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+export default function VerifyEmailPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-[#0F1B2D] flex items-center justify-center">
+        <div className="text-white text-sm">Loading…</div>
+      </div>
+    }>
+      <VerifyEmailContent />
+    </Suspense>
   )
 }

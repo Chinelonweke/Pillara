@@ -1,23 +1,8 @@
 # Dockerfile
-#
-# WHY MULTI-STAGE BUILD:
-# Stage 1 (builder): installs ALL dependencies including build tools
-# Stage 2 (runtime): copies ONLY what's needed to run — not build tools
-#
-# Result:
-# Single-stage build: ~2.5GB (all dev tools included)
-# Multi-stage build:  ~800MB (only runtime dependencies)
-#
-# Smaller image = faster deployment, less attack surface, less storage cost.
-#
-# WHY python:3.12-slim (not alpine):
-# Alpine uses musl libc, not glibc.
-# Some Python packages (numpy, torch, asyncpg) require glibc.
-# Using Alpine with these packages means compiling from source — slow, unreliable.
-# python:3.12-slim = Debian slim with glibc — smaller than full Debian, compatible.
+
 
 # ─── STAGE 1: BUILDER ─────────────────────────────────────────────────────────
-FROM python:3.12-slim AS builder
+FROM python:3.11-slim AS builder
 
 # Set environment variables that affect Python behavior
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -67,7 +52,7 @@ RUN pip install --upgrade pip && \
 
 
 # ─── STAGE 2: RUNTIME ─────────────────────────────────────────────────────────
-FROM python:3.12-slim AS runtime
+FROM python:3.11-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1

@@ -89,19 +89,15 @@ try:
 except ImportError:
     logger.warning("prometheus_instrumentator_not_installed")
 
-try:
-    from api.routers import auth, medications, interactions, ai_chat, reminders, profiles, reports, sharing
-    app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
-    app.include_router(profiles.router, prefix="/api/v1/profiles", tags=["Profiles"])
-    app.include_router(sharing.router, prefix="/api/v1/sharing", tags=["Sharing"])
-    app.include_router(medications.router, prefix="/api/v1/medications", tags=["Medications"])
-    app.include_router(interactions.router, prefix="/api/v1/interactions", tags=["Drug Interactions"])
-    app.include_router(ai_chat.router, prefix="/api/v1/ai", tags=["AI Assistant"])
-    app.include_router(reminders.router, prefix="/api/v1/reminders", tags=["Reminders"])
-    app.include_router(reports.router, prefix="/api/v1/reports", tags=["Reports"])
-except Exception as import_error:
-    logger.error("routers_failed_to_load", error=str(import_error), error_type=type(import_error).__name__)
-    raise
+from api.routers import auth, medications, interactions, ai_chat, reminders, profiles, reports, sharing
+app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
+app.include_router(profiles.router, prefix="/api/v1/profiles", tags=["Profiles"])
+app.include_router(sharing.router, prefix="/api/v1/sharing", tags=["Sharing"])
+app.include_router(medications.router, prefix="/api/v1/medications", tags=["Medications"])
+app.include_router(interactions.router, prefix="/api/v1/interactions", tags=["Drug Interactions"])
+app.include_router(ai_chat.router, prefix="/api/v1/ai", tags=["AI Assistant"])
+app.include_router(reminders.router, prefix="/api/v1/reminders", tags=["Reminders"])
+app.include_router(reports.router, prefix="/api/v1/reports", tags=["Reports"])
 
 
 @app.exception_handler(PillaraError)

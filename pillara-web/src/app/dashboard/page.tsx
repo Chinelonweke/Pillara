@@ -388,8 +388,11 @@ export default function DashboardPage() {
     setCheckResult(null)
     try {
       const drugNames = meds.map(m => m.name)
-      const drugsToCheck = drugNames.length >= 2 ? drugNames : [...drugNames, ...drugNames]
-      setCheckResult(await interactions.check(drugsToCheck.slice(0, 10), profile.id))
+      if (drugNames.length < 2) {
+        setCheckError('Add at least 2 medications to check for interactions.')
+        return
+      }
+      setCheckResult(await interactions.check(drugNames.slice(0, 10), profile.id))
     } catch (err) {
       setCheckError(err instanceof APIError ? err.message : 'Interaction check failed. Please try again.')
     } finally {

@@ -66,20 +66,6 @@ openai==1.54.4                  # OpenAI-compatible client
                                 # five providers — just change the base_url.
 anthropic==0.39.0               # Anthropic client (optional fallback)
 
-# ─── AI — SPEECH ──────────────────────────────────────────────────────────────
-openai-whisper==20240930        # Whisper STT — runs locally, free forever
-                                # Transcribes voice input to text
-TTS==0.22.0                     # Coqui TTS — runs locally, free forever
-                                # Converts AI text responses to speech
-# IMPORTANT — INSTALL CPU-ONLY TORCH FIRST, BEFORE running pip install -r requirements.txt:
-#   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
-# WHY: the default torch package on PyPI bundles CUDA (GPU) binaries, adding
-# 2-4GB for hardware this project doesn't use locally. Installing the CPU-only
-# build first means the line below is satisfied without pip pulling the GPU version.
-# If you skip this step, `pip install -r requirements.txt` still works — it just
-# downloads the much larger GPU build instead.
-torch==2.5.1                    # PyTorch — required by Whisper and Coqui TTS
-torchaudio==2.5.1               # audio processing for PyTorch
 
 # ─── AI — EMBEDDINGS & RAG ────────────────────────────────────────────────────
 fastembed==0.4.1                # fast local embeddings — no API calls, no PHI sent out
@@ -110,7 +96,7 @@ opentelemetry-exporter-otlp==1.28.1
 
 # ─── NOTIFICATIONS ────────────────────────────────────────────────────────────
 resend==2.4.0                   # email sending — verification, reminders
-pywebpush==2.0.1                # Web Push notifications for browser reminders
+
 
 # ─── SECRETS MANAGEMENT ───────────────────────────────────────────────────────
 infisicalsdk==1.0.16            # open source secrets manager client
@@ -158,3 +144,6 @@ pywin32==308; sys_platform=="win32"  # Windows-specific utilities
 prometheus-fastapi-instrumentator==6.1.0
 posthog==3.5.0
 starlette==0.41.3
+
+pytest-env==1.1.5
+httpx==0.27.2

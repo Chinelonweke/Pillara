@@ -1,23 +1,5 @@
 # ai/rag/pipeline.py
-#
-# WHY THIS FILE IS THE MOST CLINICALLY IMPORTANT IN THE AI LAYER:
-# This pipeline is what makes Pillara safe.
-# Without it, the LLM answers drug questions from training data — confidently
-# and sometimes incorrectly. With it, the LLM ONLY answers from verified
-# drug information we have retrieved and validated.
-#
-# THE PIPELINE SEQUENCE:
-# 1. Receive user query (already sanitized by middleware)
-# 2. Understand the query (extract drug names, detect intent)
-# 3. Expand the query (add synonyms, brand names)
-# 4. Retrieve relevant chunks (3 methods simultaneously)
-# 5. Combine results (Reciprocal Rank Fusion)
-# 6. Re-rank for precision (cross-encoder)
-# 7. CHECK CONFIDENCE GATE — if score too low, do not answer
-# 8. Build the LLM prompt with retrieved context
-# 9. Call the LLM (via the 5-provider fallback client)
-# 10. Validate the output
-# 11. Return the response with full metadata
+
 
 import asyncio
 import re
@@ -802,21 +784,17 @@ class RAGPipeline:
 
         section = intent_to_section.get(intent)
 
-        # If we know what section to search and we have a drug name,
-        # filter by both (most precise)
-        if section and drugs_mentioned:
-            primary_drug = drugs_mentioned[0]
-            # ChromaDB $and operator requires both conditions to match
-            return {
-                "$and": [
-                    {"section": {"$eq": section}},
-                    {"drug_name": {"$eq": primary_drug}},
-                ]
-            }
+        # Use $in to retrieve chunks for ALL drugs in the query.
+        # Previously only drugs_mentioned[0] was used — for a warfarin + ibuprofen
+        # interaction check, warfarin chunks were excluded entirely.
+        drug_filter = {"drug_name": {"$in": drugs_mentioned}} if drugs_mentioned else None
+
+        if section and drug_filter:
+            return {"$and": [{"section": {"$eq": section}}, drug_filter]}
         elif section:
             return {"section": {"$eq": section}}
-        elif drugs_mentioned:
-            return {"drug_name": {"$eq": drugs_mentioned[0]}}
+        elif drug_filter:
+            return drug_filter
 
         return None  # no filter — search all chunks
 

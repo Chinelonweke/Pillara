@@ -51,6 +51,7 @@ function SharePanel({
 
   useEffect(() => {
     fetchMembers()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const fetchMembers = async () => {
@@ -263,7 +264,7 @@ function SharePanel({
 
                   <form onSubmit={handleClaimInvite} className="space-y-4">
                     <div>
-                      <label className="block text-sm font-medium text-slate-300 mb-2">Patient's email address</label>
+                      <label className="block text-sm font-medium text-slate-300 mb-2">Patient&apos;s email address</label>
                       <input
                         type="email"
                         value={claimEmail}

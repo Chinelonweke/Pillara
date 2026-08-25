@@ -18,9 +18,11 @@ function ResetPasswordForm() {
 
   useEffect(() => {
     if (!token) {
-      setError('Invalid or missing reset token. Please request a new password reset link.')
-    }
-  }, [token])
+      setTimeout(() => {
+        setError('Invalid or missing reset token. Please request a new password reset link.')
+      }, 0)
+   }
+ }, [token])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

@@ -64,7 +64,8 @@ function SharePanel({
   }, [profileId, token])
 
   useEffect(() => {
-    setTimeout(() => { fetchMembers() }, 0)
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchMembers()
   }, [fetchMembers])
 
   const handleInvite = async (e: React.FormEvent) => {
@@ -349,7 +350,6 @@ export default function DashboardPage() {
     }
 
     loadData()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user])
 
   const handleDeleteMedication = async (medicationId: string) => {

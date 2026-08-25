@@ -1,8 +1,9 @@
 'use client'
-import { useState, useEffect, Suspense } from 'react'
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 function Logo() {
   return (
@@ -19,33 +20,22 @@ function AcceptInviteForm() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const token = searchParams.get('token')
+  const hasRun = useRef(false)
 
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
   const [message, setMessage] = useState('')
   const [needsLogin, setNeedsLogin] = useState(false)
 
-  useEffect(() => {
-    if (!token) {
-      setStatus('error')
-      setMessage('Invalid invite link. Please ask the profile owner to send you a new one.')
-      return
-    }
-    handleAccept()
-  }, [token])
-
-  const handleAccept = async () => {
+  const handleAccept = useCallback(async () => {
     if (!token) return
     setStatus('loading')
-
     try {
-      const accessToken = localStorage.getItem('access_token')
-
+      const accessToken = localStorage.getItem('pillara_access_token')
       if (!accessToken) {
         setNeedsLogin(true)
         setStatus('idle')
         return
       }
-
       const response = await fetch(`${API_BASE}/api/v1/sharing/accept-invite`, {
         method: 'POST',
         headers: {
@@ -54,15 +44,12 @@ function AcceptInviteForm() {
         },
         body: JSON.stringify({ invite_token: token }),
       })
-
       const data = await response.json()
-
       if (!response.ok) {
         setStatus('error')
         setMessage(data.detail || 'Failed to accept invite. It may have expired.')
         return
       }
-
       setStatus('success')
       setMessage(data.message || 'Invite accepted!')
       setTimeout(() => router.push('/dashboard'), 2500)
@@ -70,7 +57,20 @@ function AcceptInviteForm() {
       setStatus('error')
       setMessage('Something went wrong. Please try again.')
     }
-  }
+  }, [token, router])
+
+  useEffect(() => {
+    if (hasRun.current) return
+    hasRun.current = true
+
+    if (!token) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setStatus('error')
+      setMessage('Invalid invite link. Please ask the profile owner to send you a new one.')
+      return
+    }
+    handleAccept()
+  }, [token, handleAccept])
 
   if (needsLogin) {
     return (
@@ -108,7 +108,6 @@ function AcceptInviteForm() {
       <div className="w-full max-w-md">
         <Logo />
         <div className="bg-white/5 border border-white/10 rounded-2xl p-8 text-center">
-
           {status === 'loading' && (
             <>
               <div className="w-12 h-12 bg-[#4A9B8E]/20 rounded-full flex items-center justify-center mx-auto mb-4 animate-pulse">
@@ -118,7 +117,6 @@ function AcceptInviteForm() {
               <p className="text-slate-400 text-sm">Just a moment.</p>
             </>
           )}
-
           {status === 'success' && (
             <>
               <div className="w-12 h-12 bg-[#4A9B8E]/20 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -129,7 +127,6 @@ function AcceptInviteForm() {
               <p className="text-slate-500 text-xs mt-3">Redirecting to your dashboard...</p>
             </>
           )}
-
           {status === 'error' && (
             <>
               <div className="w-12 h-12 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -142,7 +139,6 @@ function AcceptInviteForm() {
               </Link>
             </>
           )}
-
         </div>
         <p className="text-center mt-6">
           <Link href="/login" className="text-slate-500 hover:text-slate-300 text-sm transition-colors">

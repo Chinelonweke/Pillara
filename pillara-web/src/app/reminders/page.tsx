@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, Suspense } from 'react'
+import { useState, useEffect, useCallback, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 
@@ -65,12 +65,7 @@ function RemindersContent() {
     'Content-Type': 'application/json'
   }
 
-  useEffect(() => {
-    if (!profileId) { router.push('/dashboard'); return }
-    loadData()
-  }, [profileId])
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true)
     try {
       const [remRes, medRes] = await Promise.all([
@@ -84,7 +79,14 @@ function RemindersContent() {
     } finally {
       setLoading(false)
     }
-  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profileId])
+
+  useEffect(() => {
+    if (!profileId) { router.push('/dashboard'); return }
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadData()
+  }, [profileId, loadData, router])
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -296,7 +298,7 @@ function RemindersContent() {
             </div>
             <h3 className="text-white font-medium mb-2">No reminders yet</h3>
             <p className="text-slate-400 text-sm mb-6">
-              Set up reminders to get email notifications when it's time to take your medications.
+              Set up reminders to get email notifications when it&apos;s time to take your medications.
             </p>
             <button
               onClick={() => setShowAddForm(true)}

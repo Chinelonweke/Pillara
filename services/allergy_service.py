@@ -45,7 +45,7 @@ DRUG_TO_CLASS: dict[str, list[str]] = {
     "dapsone":              ["sulfonamide"],
     "furosemide":           ["sulfonamide"],       # sulfa-based diuretic
     "hydrochlorothiazide":  ["sulfonamide"],       # sulfa-based diuretic
-    "celecoxib":            ["sulfonamide"],       # sulfa-based COX-2 inhibitor
+   
 
     # ── NSAIDs ────────────────────────────────────────────────────────────────
     "ibuprofen":            ["nsaid"],

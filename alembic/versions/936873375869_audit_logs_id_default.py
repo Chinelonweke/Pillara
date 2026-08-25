@@ -33,7 +33,6 @@ gen_random_uuid() is built into PostgreSQL 13+ (pgvector/pgvector:pg16,
 our image, definitely includes it) - no extension needs to be enabled.
 """
 from alembic import op
-import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.

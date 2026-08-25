@@ -31,7 +31,6 @@
 import asyncio
 import hashlib
 import sys
-from typing import Optional
 
 import httpx
 import chromadb

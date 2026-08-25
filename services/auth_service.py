@@ -1,4 +1,3 @@
-import hashlib
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.exc import IntegrityError

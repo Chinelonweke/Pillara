@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Query, Request
 
-from api.dependencies import CurrentUser, DBSession, RedisClient, VerifiedUser
+from api.dependencies import CurrentUser, DBSession, VerifiedUser
 from services.medication_service import MedicationService
 from schemas.all_schemas import (
     MedicationCreate,

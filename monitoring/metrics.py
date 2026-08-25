@@ -4,7 +4,7 @@
 # Tracks: request counts, latencies, LLM provider usage, confidence gate triggers.
 # These metrics feed dashboards and alerting (e.g. "confidence gate triggered >20% of requests").
 
-from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
+from prometheus_client import Counter, Histogram, Gauge, generate_latest
 
 # ─── HTTP METRICS ──────────────────────────────────────────────────────────────
 

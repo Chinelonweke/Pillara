@@ -34,7 +34,7 @@ class MedicationService:
             .order_by(Medication.created_at.desc())
         )
         if not include_inactive:
-            query = query.where(Medication.is_active == True)
+            query = query.where(Medication.is_active.is_(True))
 
         result = await self.db.execute(query)
         medications = list(result.scalars().all())
@@ -80,7 +80,7 @@ class MedicationService:
             self._ownership_query(user_id).where(
                 Medication.profile_id == profile_id,
                 Medication.name.ilike(sanitized_name),
-                Medication.is_active == True,
+                Medication.is_active.is_(True),
             )
         )
         if existing_result.scalar_one_or_none():

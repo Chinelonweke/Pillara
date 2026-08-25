@@ -4,16 +4,15 @@
 import asyncio
 import re
 import time
-from dataclasses import dataclass, field  # dataclass = cleaner way to make data containers
-from typing import Any, Optional
+from dataclasses import dataclass  # dataclass = cleaner way to make data containers
+from typing import Optional
 
 import chromadb
 from chromadb.config import Settings as ChromaSettings
 
-from ai.llm.client import LLMClient, QueryComplexity
+from ai.llm.client import LLMClient
 from ai.llm.prompts import (
     build_interaction_prompt,
-    build_medication_info_prompt,
     build_general_chat_prompt,
 )
 from core.config import settings
@@ -951,7 +950,7 @@ Relevance Score: {chunk.final_score:.3f}
         stale_threshold_days = 90
 
         for chunk in chunks:
-            source_date_str = chunk.source  # "fda_label_2024-01" format if available
+            # chunk.source contains "fda_label_2024-01" format if available
             ingestion_date_str = getattr(chunk, 'ingestion_date', None)
 
             if ingestion_date_str:

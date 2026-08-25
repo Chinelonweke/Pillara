@@ -1,9 +1,9 @@
 # api/routers/reports.py
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Request
 
-from api.dependencies import CurrentUser, DBSession, VerifiedUser
-from schemas.all_schemas import ReportGenerateRequest, ReportResponse, SuccessResponse
+from api.dependencies import DBSession, VerifiedUser
+from schemas.all_schemas import ReportGenerateRequest, ReportResponse
 from monitoring.logger import get_logger
 
 logger = get_logger(__name__)

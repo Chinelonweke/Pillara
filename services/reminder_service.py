@@ -1,7 +1,7 @@
 # services/reminder_service.py
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.exceptions import NotFoundError
@@ -27,7 +27,7 @@ class ReminderService:
             .where(
                 Profile.user_id == user_id,
                 Reminder.profile_id == profile_id,
-                Reminder.is_active == True,
+                Reminder.is_active.is_(True),
             )
             .order_by(Reminder.next_send_at.asc())
         )
@@ -52,7 +52,7 @@ class ReminderService:
             select(Medication).where(
                 Medication.id == reminder_data.medication_id,
                 Medication.profile_id == profile_id,
-                Medication.is_active == True,
+                Medication.is_active.is_(True),
             )
         )
         if not med_result.scalar_one_or_none():
@@ -113,10 +113,10 @@ class ReminderService:
         result = await self.db.execute(
             select(Reminder)
             .where(
-                Reminder.is_active == True,
+                Reminder.is_active.is_(True),
                 Reminder.next_send_at <= now,
                 # Either not locked, or lock is stale (worker crashed >5 min ago)
-                (Reminder.processing_locked_at == None) |
+                (Reminder.processing_locked_at.is_(None)) |
                 (Reminder.processing_locked_at < stale_lock_threshold),
             )
             .limit(batch_size)

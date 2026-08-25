@@ -14,7 +14,6 @@ import re
 import secrets
 import unicodedata
 from datetime import datetime, timedelta, timezone
-from typing import Optional
 
 import jwt
 from passlib.context import CryptContext

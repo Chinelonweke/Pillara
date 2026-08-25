@@ -5,7 +5,7 @@ import json
 from fastapi import APIRouter, Depends, Request
 
 from api.dependencies import (
-    CurrentUser, DBSession, RedisClient, VerifiedUser,
+    DBSession, RedisClient, VerifiedUser,
     rate_limit_api, rate_limit_llm,
 )
 from schemas.all_schemas import InteractionCheckRequest, InteractionCheckResponse
@@ -29,10 +29,8 @@ async def check_interactions(
     redis: RedisClient,
 ) -> InteractionCheckResponse:
     from ai.rag.pipeline import RAGPipeline
-    from ai.llm.prompts import build_interaction_prompt
-    from ai.llm.client import LLMClient, QueryComplexity
     from monitoring.audit import AuditEventType, AuditLogger, AuditOutcome
-    from core.security import sanitize_medication_name, strip_llm_output_html
+    from core.security import sanitize_medication_name
     from services.allergy_service import check_allergies
     from services.medication_service import MedicationService
     from services.profile_service import ProfileService

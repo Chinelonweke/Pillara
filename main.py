@@ -1,11 +1,11 @@
 # main.py
 import asyncio
 from contextlib import asynccontextmanager
-
+from api.routers import auth, medications, interactions, ai_chat, reminders, profiles, reports, sharing
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-
+from api.middleware import RequestContextMiddleware, SecurityHeadersMiddleware
 from core.config import settings
 from core.database import close_database, init_database, init_chromadb_with_retry
 from core.exceptions import PillaraError, RateLimitError
@@ -66,7 +66,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-from api.middleware import RequestContextMiddleware, SecurityHeadersMiddleware
+
 
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RequestContextMiddleware)
@@ -89,7 +89,7 @@ try:
 except ImportError:
     logger.warning("prometheus_instrumentator_not_installed")
 
-from api.routers import auth, medications, interactions, ai_chat, reminders, profiles, reports, sharing
+
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
 app.include_router(profiles.router, prefix="/api/v1/profiles", tags=["Profiles"])
 app.include_router(sharing.router, prefix="/api/v1/sharing", tags=["Sharing"])

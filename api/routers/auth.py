@@ -13,7 +13,6 @@
 from fastapi import APIRouter, Depends, Request
 
 from api.dependencies import CurrentUser, DBSession, RedisClient, rate_limit_auth
-from core.exceptions import AuthenticationError
 from core.security import decode_token
 from schemas.all_schemas import (
     LoginRequest,

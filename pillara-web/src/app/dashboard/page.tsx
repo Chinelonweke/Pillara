@@ -107,7 +107,7 @@ function SharePanel({
   }
 
   const handleRevoke = async (targetUserId: string) => {
-    if (!confirm('Revoke this person\'s access?')) return
+    if (!confirm("Revoke this person's access?")) return
     try {
       await fetch(`${API_BASE}/api/v1/sharing/${profileId}/members/${targetUserId}`, {
         method: 'DELETE',
@@ -349,6 +349,7 @@ export default function DashboardPage() {
     }
 
     loadData()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user])
 
   const handleDeleteMedication = async (medicationId: string) => {

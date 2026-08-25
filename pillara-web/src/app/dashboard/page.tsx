@@ -1,9 +1,9 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/lib/auth-context'
-import { profiles, medications, interactions, ai, Profile, Medication, InteractionCheckResponse, APIError } from '@/lib/api'
+import { profiles, medications, interactions, ai, Profile, ProfileWithRole, Medication, InteractionCheckResponse, APIError } from '@/lib/api'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
@@ -17,7 +17,14 @@ function stripMarkdown(text: string): string {
     .trim()
 }
 
-// ── Share Panel Modal ─────────────────────────────────────────────────────────
+interface Member {
+  email: string
+  role: string
+  status: string
+  user_id: string
+}
+
+// Share Panel Modal
 function SharePanel({
   profileId,
   profileName,
@@ -33,35 +40,32 @@ function SharePanel({
   const headers = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
 
   const [tab, setTab] = useState<'invite' | 'claim' | 'members'>('members')
-  const [members, setMembers] = useState<any[]>([])
+  const [members, setMembers] = useState<Member[]>([])
   const [loadingMembers, setLoadingMembers] = useState(true)
 
-  // Invite state
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteRole, setInviteRole] = useState('viewer')
   const [inviting, setInviting] = useState(false)
   const [inviteMsg, setInviteMsg] = useState('')
   const [inviteError, setInviteError] = useState('')
 
-  // Claim invite state
   const [claimEmail, setClaimEmail] = useState('')
   const [claiming, setClaiming] = useState(false)
   const [claimMsg, setClaimMsg] = useState('')
   const [claimError, setClaimError] = useState('')
 
-  useEffect(() => {
-    fetchMembers()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  const fetchMembers = async () => {
+  const fetchMembers = useCallback(async () => {
     setLoadingMembers(true)
     try {
       const res = await fetch(`${API_BASE}/api/v1/sharing/${profileId}/members`, { headers: { 'Authorization': `Bearer ${token}` } })
       if (res.ok) setMembers(await res.json())
     } catch {}
     finally { setLoadingMembers(false) }
-  }
+  }, [profileId, token])
+
+  useEffect(() => {
+    setTimeout(() => { fetchMembers() }, 0)
+  }, [fetchMembers])
 
   const handleInvite = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -118,7 +122,6 @@ function SharePanel({
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-[#0F1B2D] border border-white/10 rounded-2xl w-full max-w-lg shadow-2xl">
-        {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
           <div>
             <h2 className="text-white font-semibold">Share Profile</h2>
@@ -127,7 +130,6 @@ function SharePanel({
           <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors text-xl">✕</button>
         </div>
 
-        {/* Tabs */}
         <div className="flex border-b border-white/10">
           {(['members', 'invite', 'claim'] as const).map(t => (
             <button
@@ -143,7 +145,6 @@ function SharePanel({
         </div>
 
         <div className="p-6">
-          {/* Members tab */}
           {tab === 'members' && (
             <div>
               {loadingMembers ? (
@@ -182,7 +183,6 @@ function SharePanel({
             </div>
           )}
 
-          {/* Invite caregiver tab */}
           {tab === 'invite' && (
             <div>
               {!isOwner ? (
@@ -190,7 +190,7 @@ function SharePanel({
               ) : (
                 <>
                   <p className="text-slate-400 text-sm mb-4 leading-relaxed">
-                    Invite a caregiver or nurse to access this profile. They'll receive an email with a link to accept.
+                    Invite a caregiver or nurse to access this profile. They&apos;ll receive an email with a link to accept.
                   </p>
 
                   {inviteMsg && (
@@ -240,7 +240,6 @@ function SharePanel({
             </div>
           )}
 
-          {/* Send to patient tab */}
           {tab === 'claim' && (
             <div>
               {!isOwner ? (
@@ -292,13 +291,13 @@ function SharePanel({
   )
 }
 
-// ── Main Dashboard ────────────────────────────────────────────────────────────
+// Main Dashboard
 export default function DashboardPage() {
   const { user, logout, loading: authLoading } = useAuth()
   const router = useRouter()
 
   const [profile, setProfile] = useState<Profile | null>(null)
-  const [allProfiles, setAllProfiles] = useState<any[]>([])
+  const [allProfiles, setAllProfiles] = useState<ProfileWithRole[]>([])
   const [showProfileSwitcher, setShowProfileSwitcher] = useState(false)
   const [showSharePanel, setShowSharePanel] = useState(false)
   const [meds, setMeds] = useState<Medication[]>([])
@@ -406,7 +405,7 @@ export default function DashboardPage() {
     setLoadingData(true)
     try {
       const profileList = await profiles.list()
-      const selected = profileList.find((p: any) => p.id === profileId)
+      const selected = profileList.find((p: Profile) => p.id === profileId)
       if (selected) {
         setProfile(selected)
         setMeds(await medications.list(selected.id))
@@ -435,7 +434,7 @@ export default function DashboardPage() {
         body: JSON.stringify({ conversation_id: conversationId, rating }),
       })
     } catch {
-      // Feedback failure is non-critical — never show error to user
+      // Feedback failure is non-critical
     }
   }
 
@@ -469,14 +468,14 @@ export default function DashboardPage() {
   if (authLoading || loadingData) {
     return (
       <div className="min-h-screen bg-[#0F1B2D] flex items-center justify-center">
-        <div className="text-slate-400 text-sm">Loading your medications…</div>
+        <div className="text-slate-400 text-sm">Loading your medications...</div>
       </div>
     )
   }
 
   if (!user) return null
 
-  const currentProfileRole = allProfiles.find((p: any) => p.id === profile?.id)?.role || 'owner'
+  const currentProfileRole = allProfiles.find((p: ProfileWithRole) => p.id === profile?.id)?.role || 'owner'
 
   const riskColor = {
     high: 'text-red-400 bg-red-500/10 border-red-500/20',
@@ -488,7 +487,6 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-[#0F1B2D]">
-      {/* Share Panel Modal */}
       {showSharePanel && profile && (
         <SharePanel
           profileId={profile.id}
@@ -498,7 +496,6 @@ export default function DashboardPage() {
         />
       )}
 
-      {/* Top nav */}
       <nav className="border-b border-white/10 px-8 py-4">
         <div className="max-w-5xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -507,7 +504,6 @@ export default function DashboardPage() {
             </div>
             <span className="text-white font-semibold">Pillara</span>
 
-            {/* Profile Switcher */}
             {allProfiles.length > 0 && (
               <div className="relative ml-4">
                 <button
@@ -524,7 +520,7 @@ export default function DashboardPage() {
                     <div className="px-3 py-2 border-b border-white/10">
                       <p className="text-xs text-slate-400 font-medium uppercase tracking-wide">Switch Profile</p>
                     </div>
-                    {allProfiles.map((p: any) => (
+                    {allProfiles.map((p: ProfileWithRole) => (
                       <button
                         key={p.id}
                         onClick={() => switchProfile(p.id)}
@@ -582,12 +578,14 @@ export default function DashboardPage() {
                 </button>
               </div>
             )}
-            <Link
-              href={`/reminders?profile_id=${profile?.id}`}
-              className="text-slate-400 hover:text-white text-sm transition-colors"
-            >
-              Reminders
-            </Link>
+            {profile && (
+              <Link
+                href={`/reminders?profile_id=${profile.id}`}
+                className="text-slate-400 hover:text-white text-sm transition-colors"
+              >
+                Reminders
+              </Link>
+            )}
             <Link href="/settings" className="text-slate-400 hover:text-white text-sm transition-colors">
               Settings
             </Link>
@@ -599,7 +597,6 @@ export default function DashboardPage() {
       </nav>
 
       <main className="max-w-5xl mx-auto px-8 py-10">
-        {/* Profile header */}
         <div className="mb-10 flex items-start justify-between">
           <div>
             <h1 className="text-2xl font-bold text-white mb-1">{profile?.name || 'My Medications'}</h1>
@@ -619,7 +616,6 @@ export default function DashboardPage() {
             )}
           </div>
 
-          {/* Share button */}
           {profile && (
             <button
               onClick={() => setShowSharePanel(true)}
@@ -633,7 +629,6 @@ export default function DashboardPage() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* Left: Medications */}
           <div>
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-white font-semibold">Current medications</h2>
@@ -699,13 +694,12 @@ export default function DashboardPage() {
                   disabled={addingMed || !newMedName.trim()}
                   className="w-full bg-[#4A9B8E] hover:bg-[#3d8a7d] disabled:opacity-50 disabled:cursor-not-allowed text-white py-2.5 rounded-lg text-sm font-medium transition-colors"
                 >
-                  {addingMed ? 'Adding…' : 'Add medication'}
+                  {addingMed ? 'Adding...' : 'Add medication'}
                 </button>
               </form>
             </div>
           </div>
 
-          {/* Right: Interaction check */}
           <div>
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-white font-semibold">Safety check</h2>
@@ -720,7 +714,7 @@ export default function DashboardPage() {
                 disabled={checking || meds.length === 0}
                 className="w-full bg-[#4A9B8E] hover:bg-[#3d8a7d] disabled:opacity-50 disabled:cursor-not-allowed text-white py-3 rounded-lg text-sm font-semibold transition-colors"
               >
-                {checking ? 'Checking…' : `Check ${meds.length} medication${meds.length !== 1 ? 's' : ''}`}
+                {checking ? 'Checking...' : `Check ${meds.length} medication${meds.length !== 1 ? 's' : ''}`}
               </button>
               {meds.length === 0 && (
                 <p className="text-slate-500 text-xs mt-2 text-center">Add at least one medication first.</p>
@@ -778,7 +772,6 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* AI Chat */}
         <div className="mt-10">
           <div className="flex items-center justify-between mb-4">
             <div>
@@ -796,7 +789,7 @@ export default function DashboardPage() {
                   </div>
                   <p className="text-slate-300 text-sm font-medium mb-2">Ask anything about medications</p>
                   <p className="text-slate-500 text-xs leading-relaxed max-w-sm">
-                    Try: "What drug class is amoxicillin?" or "What are the side effects of ibuprofen?"
+                    Try: &quot;What drug class is amoxicillin?&quot; or &quot;What are the side effects of ibuprofen?&quot;
                   </p>
                   <div className="flex flex-wrap gap-2 mt-4 justify-center">
                     {['What is amoxicillin used for?', 'How do beta-blockers work?', 'What are NSAIDs?'].map((suggestion) => (
@@ -819,40 +812,40 @@ export default function DashboardPage() {
                       </div>
                     )}
                     <div className="flex flex-col gap-1">
-                    <div className={`max-w-[75%] rounded-2xl px-4 py-3 ${
-                      msg.role === 'user'
-                        ? 'bg-[#4A9B8E] text-white rounded-tr-sm'
-                        : 'bg-white/8 border border-white/10 text-slate-300 rounded-tl-sm'
-                    }`}>
-                      <p className="text-sm leading-relaxed">{stripMarkdown(msg.content)}</p>
-                    </div>
-                    {msg.role === 'assistant' && (
-                      <div className="flex items-center gap-2 ml-1">
-                        {feedbackGiven[i] ? (
-                          <span className="text-xs text-slate-500">
-                            {feedbackGiven[i] === 'helpful' ? '👍 Thanks!' : '👎 Noted'}
-                          </span>
-                        ) : (
-                          <>
-                            <button
-                              onClick={() => handleFeedback(i, 'helpful')}
-                              className="text-slate-500 hover:text-green-400 text-xs transition-colors"
-                              title="Helpful"
-                            >
-                              👍
-                            </button>
-                            <button
-                              onClick={() => handleFeedback(i, 'unhelpful')}
-                              className="text-slate-500 hover:text-red-400 text-xs transition-colors"
-                              title="Not helpful"
-                            >
-                              👎
-                            </button>
-                          </>
-                        )}
+                      <div className={`max-w-[75%] rounded-2xl px-4 py-3 ${
+                        msg.role === 'user'
+                          ? 'bg-[#4A9B8E] text-white rounded-tr-sm'
+                          : 'bg-white/8 border border-white/10 text-slate-300 rounded-tl-sm'
+                      }`}>
+                        <p className="text-sm leading-relaxed">{stripMarkdown(msg.content)}</p>
                       </div>
-                    )}
-                  </div>
+                      {msg.role === 'assistant' && (
+                        <div className="flex items-center gap-2 ml-1">
+                          {feedbackGiven[i] ? (
+                            <span className="text-xs text-slate-500">
+                              {feedbackGiven[i] === 'helpful' ? '👍 Thanks!' : '👎 Noted'}
+                            </span>
+                          ) : (
+                            <>
+                              <button
+                                onClick={() => handleFeedback(i, 'helpful')}
+                                className="text-slate-500 hover:text-green-400 text-xs transition-colors"
+                                title="Helpful"
+                              >
+                                👍
+                              </button>
+                              <button
+                                onClick={() => handleFeedback(i, 'unhelpful')}
+                                className="text-slate-500 hover:text-red-400 text-xs transition-colors"
+                                title="Not helpful"
+                              >
+                                👎
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 ))
               )}
@@ -880,7 +873,7 @@ export default function DashboardPage() {
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleChatSend()}
-                  placeholder="Ask about a drug, class, or interaction…"
+                  placeholder="Ask about a drug, class, or interaction..."
                   disabled={chatLoading}
                   className="flex-1 bg-white/5 border border-white/10 rounded-lg px-4 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-[#4A9B8E] focus:ring-1 focus:ring-[#4A9B8E] transition-colors text-sm disabled:opacity-50"
                 />

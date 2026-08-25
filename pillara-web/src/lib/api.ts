@@ -173,6 +173,11 @@ export interface Profile {
   created_at: string
 }
 
+export interface ProfileWithRole extends Profile {
+  role: string
+  is_shared_with_me: boolean
+}
+
 export const profiles = {
   list: () => apiFetch<Profile[]>('/api/v1/profiles/'),
 

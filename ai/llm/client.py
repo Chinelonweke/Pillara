@@ -32,41 +32,27 @@ PROVIDER_CONFIGS: list = [
         "timeout_seconds": 8,
         "extra_headers": {},
     },
+
     {
-        "name": "cerebras",
-        "priority": 2,
-        "base_url": "https://api.cerebras.ai/v1",
-        "api_key_setting": "CEREBRAS_API_KEY",
-        "models": {
-            QueryComplexity.COMPLEX: "llama3.1-70b",
-            QueryComplexity.SIMPLE:  "llama3.1-8b",
-        },
-        "timeout_seconds": 10,
-        "extra_headers": {},
-    },
-    {
-        "name": "openrouter",
+        "name": "gemini",
         "priority": 3,
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_setting": "OPENROUTER_API_KEY",
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/models",
+        "api_key_setting": "GOOGLE_API_KEY",
         "models": {
             QueryComplexity.COMPLEX: [
-                "meta-llama/llama-3.1-8b-instruct:free",
-                "mistralai/mistral-7b-instruct:free",
-                "google/gemma-3-27b-it:free",
-                "qwen/qwen-2-7b-instruct:free",
+                "gemini-3.5-flash",
+                "gemini-3.1-flash-lite",
+                "gemini-flash-lite-latest",
             ],
             QueryComplexity.SIMPLE: [
-                "meta-llama/llama-3.1-8b-instruct:free",
-                "mistralai/mistral-7b-instruct:free",
-                "google/gemma-3-27b-it:free",
+                "gemini-3.5-flash-lite",
+                "gemini-flash-lite-latest",
+                "gemini-3.1-flash-lite",
             ],
         },
-        "timeout_seconds": 15,
-        "extra_headers": {
-            "HTTP-Referer": settings.OPENROUTER_SITE_URL,
-            "X-Title": settings.OPENROUTER_SITE_NAME,
-        },
+        "timeout_seconds": 30,
+        "extra_headers": {},
+        "custom_handler": "gemini",
     },
     {
         "name": "together",
@@ -120,6 +106,58 @@ class LLMClient:
             await self.redis.setex(f"{self._health_key_prefix}{provider_name}", ttl, "unhealthy")
         except Exception:
             pass
+
+    async def _call_gemini_provider(self, provider_config: dict, model: str, messages: list, system_prompt: str) -> str:
+        """
+        Calls Google Gemini API using its native format.
+        Gemini uses a different request/response format from OpenAI.
+        """
+        import httpx
+
+        api_key = self._get_api_key(provider_config)
+        if not api_key:
+            raise ValueError("No API key configured for gemini")
+
+        # Convert OpenAI message format to Gemini format
+        contents = []
+        for msg in messages:
+            role = "user" if msg["role"] == "user" else "model"
+            contents.append({
+                "role": role,
+                "parts": [{"text": msg["content"]}]
+            })
+
+        # Add system prompt as first user message if provided
+        if system_prompt:
+            contents.insert(0, {
+                "role": "user",
+                "parts": [{"text": f"System instructions: {system_prompt}"}]
+            })
+            contents.insert(1, {
+                "role": "model",
+                "parts": [{"text": "Understood. I will follow these instructions."}]
+            })
+
+        url = f"{provider_config['base_url']}/{model}:generateContent?key={api_key}"
+
+        async with httpx.AsyncClient(timeout=provider_config["timeout_seconds"]) as client:
+            response = await asyncio.wait_for(
+                client.post(url, json={"contents": contents}),
+                timeout=provider_config["timeout_seconds"]
+            )
+            response.raise_for_status()
+            data = response.json()
+
+        # Extract text from Gemini response format
+        text = data["candidates"][0]["content"]["parts"][0]["text"]
+
+        logger.info(
+            "llm_call_success",
+            provider="gemini",
+            model=model,
+            latency_ms=0,
+        )
+        return text
 
     async def _call_openai_compatible_provider(self, provider_config: dict, model: str, messages: list, system_prompt: str) -> str:
         api_key = self._get_api_key(provider_config)
@@ -193,7 +231,26 @@ class LLMClient:
             try:
                 model_for_complexity = provider_config["models"][complexity]
 
-                if isinstance(model_for_complexity, list):
+                if provider_config.get("custom_handler") == "gemini":
+                    model_list = model_for_complexity if isinstance(model_for_complexity, list) else [model_for_complexity]
+                    response_text = None
+                    model_used = "gemini_model"
+                    for gemini_model in model_list:
+                        try:
+                            response_text = await self._call_gemini_provider(
+                                provider_config=provider_config,
+                                model=gemini_model,
+                                messages=messages,
+                                system_prompt=system_prompt,
+                            )
+                            model_used = gemini_model
+                            break
+                        except Exception as gemini_error:
+                            logger.warning("gemini_model_failed", model=gemini_model, error=str(gemini_error))
+                            continue
+                    if response_text is None:
+                        raise ValueError("All Gemini models failed")
+                elif isinstance(model_for_complexity, list):
                     response_text = await self._try_openrouter_models(
                         provider_config=provider_config, model_list=model_for_complexity,
                         messages=messages, system_prompt=system_prompt,

@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
     OPENROUTER_SITE_URL: str = "https://pillara.site"
     OPENROUTER_SITE_NAME: str = "Pillara"
+    MISTRAL_API_KEY: Optional[str] = None
+    MISTRAL_BASE_URL: str = "https://api.mistral.ai/v1"
+    GOOGLE_API_KEY: Optional[str] = None
     TOGETHER_API_KEY: Optional[str] = None
     TOGETHER_BASE_URL: str = "https://api.together.xyz/v1"
     HUGGINGFACE_API_KEY: Optional[str] = None

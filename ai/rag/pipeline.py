@@ -219,7 +219,7 @@ class QueryUnderstanding:
             return False
 
         # Also not off-topic if we detected drug names
-        if self.drugs_mentioned:
+        if self.extract_drug_names():
             return False
 
         # Check for off-topic keywords
@@ -376,13 +376,29 @@ class RAGPipeline:
             )
 
         intent = understanding.detect_intent()
-        drugs_mentioned = understanding.extract_drug_names()
+        raw_drug_names = understanding.extract_drug_names()
         expanded_query = understanding.expand_query()
+
+        # ── RxNorm Resolution ──────────────────────────────────────────────
+        # Resolve brand names to generic names before ChromaDB lookup.
+        # "Tylenol" → "acetaminophen", "Advil" → "ibuprofen"
+        # This runs in parallel for all drug names found.
+        # Cached in Redis for 24hrs — fast on repeat queries.
+        if raw_drug_names:
+            try:
+                from services.drug_name_resolver import resolve_all_drug_names
+                drugs_mentioned = await resolve_all_drug_names(raw_drug_names, self.redis)
+            except Exception as resolve_error:
+                logger.warning("rxnorm_resolution_failed", error=str(resolve_error))
+                drugs_mentioned = raw_drug_names
+        else:
+            drugs_mentioned = raw_drug_names
 
         logger.info(
             "rag_query_understood",
             intent=intent,
-            drugs_found=len(drugs_mentioned),
+            drugs_raw=raw_drug_names,
+            drugs_resolved=drugs_mentioned,
             request_id=request_id,
         )
 
@@ -515,6 +531,143 @@ class RAGPipeline:
             prompt_tokens=llm_result.get("prompt_tokens", 0),
             completion_tokens=llm_result.get("completion_tokens", 0),
         )
+
+    async def query_stream(
+        self,
+        user_query: str,
+        profile_medications: Optional[list] = None,
+        conversation_history: Optional[list] = None,
+        request_id: str = "unknown",
+    ):
+        """
+        Streaming version of query().
+        Runs all RAG pipeline steps (retrieval, reranking, confidence gate),
+        then streams LLM tokens as they arrive.
+
+        Yields:
+            dict with type "chunk" (text fragment) or "meta" (final metadata)
+
+        The frontend handles both chunk types:
+        - "chunk": append text to the current message
+        - "meta": update provider_used, confidence_gate_passed etc.
+
+        WHY YIELD METADATA AT THE END:
+        The frontend needs to know if the confidence gate passed, which
+        provider was used, and the conversation_id. These are only known
+        after the full pipeline runs, so they come after all text chunks.
+        """
+        pipeline_start = time.monotonic()
+
+        # ── Off-topic guard ───────────────────────────────────────────────
+        understanding = QueryUnderstanding(user_query)
+        if understanding.is_off_topic():
+            yield {"type": "chunk", "text": (
+                "I can only help with medication-related questions — "
+                "drug interactions, side effects, dosage, and medication safety. "
+                "For other topics, please consult appropriate resources."
+            )}
+            yield {"type": "meta", "confidence_gate_passed": False,
+                   "provider_used": "none", "query_intent": "off_topic",
+                   "fallback_triggered": True, "latency_ms": 0.0}
+            return
+
+        intent = understanding.detect_intent()
+        drugs_mentioned = understanding.extract_drug_names()
+        expanded_query = understanding.expand_query()
+
+        # ── Retrieval + Reranking (same as non-streaming query) ───────────
+        try:
+            complexity = await self.llm_client.classify_query_complexity(user_query)
+
+            vector_results, keyword_results = await asyncio.gather(
+                self._vector_search(expanded_query, intent, drugs_mentioned),
+                self._keyword_search(expanded_query, drugs_mentioned),
+            )
+
+            combined_chunks = self._reciprocal_rank_fusion(
+                vector_results, keyword_results, top_k=20
+            )
+
+            if not combined_chunks:
+                yield {"type": "chunk", "text": (
+                    "I don't have enough verified information to answer that question. "
+                    "Please consult your pharmacist or doctor for accurate guidance."
+                )}
+                yield {"type": "meta", "confidence_gate_passed": False,
+                       "provider_used": "none", "query_intent": intent,
+                       "fallback_triggered": True,
+                       "latency_ms": round((time.monotonic() - pipeline_start) * 1000, 2)}
+                return
+
+            best_score = max(chunk.similarity_score for chunk in combined_chunks)
+            top_chunks = self._rerank_chunks(
+                query=user_query, chunks=combined_chunks,
+                top_k=settings.RAG_TOP_K_RESULTS,
+            )
+
+            # Confidence gate
+            if best_score < settings.RAG_CONFIDENCE_THRESHOLD:
+                yield {"type": "chunk", "text": (
+                    "I don't have enough verified information to answer that question confidently. "
+                    "Please consult your pharmacist or doctor for accurate guidance."
+                )}
+                yield {"type": "meta", "confidence_gate_passed": False,
+                       "provider_used": "none", "query_intent": intent,
+                       "fallback_triggered": True,
+                       "latency_ms": round((time.monotonic() - pipeline_start) * 1000, 2)}
+                return
+
+            # Build context and prompt — use same pattern as non-streaming query
+            retrieved_context = self._build_context_string(top_chunks)
+
+            from ai.llm.prompts import build_interaction_prompt, build_general_chat_prompt
+            if intent == "interaction_check" and drugs_mentioned:
+                system_prompt = build_interaction_prompt(
+                    retrieved_context=retrieved_context,
+                    drug_names=drugs_mentioned,
+                    is_voice=False,
+                )
+            else:
+                system_prompt = build_general_chat_prompt(is_voice=False)
+
+            messages = self._build_messages(
+                user_query=user_query,
+                retrieved_context=retrieved_context,
+                conversation_history=conversation_history or [],
+                profile_medications=profile_medications or [],
+            )
+
+            # ── Stream LLM response ───────────────────────────────────────
+            provider_used = "groq"
+            async for text_chunk in self.llm_client.stream_complete(
+                messages=messages,
+                system_prompt=system_prompt,
+                complexity=complexity,
+                request_id=request_id,
+            ):
+                # Strip thinking chain from chunks
+                cleaned = self._strip_thinking_chain(text_chunk)
+                if cleaned:
+                    yield {"type": "chunk", "text": cleaned}
+
+            total_latency = round((time.monotonic() - pipeline_start) * 1000, 2)
+            yield {
+                "type": "meta",
+                "confidence_gate_passed": True,
+                "provider_used": provider_used,
+                "query_intent": intent,
+                "fallback_triggered": False,
+                "latency_ms": total_latency,
+            }
+
+        except Exception as error:
+            logger.error("pipeline_stream_error", error=str(error), request_id=request_id)
+            yield {"type": "chunk", "text": (
+                "Something went wrong. Please try again in a moment."
+            )}
+            yield {"type": "meta", "confidence_gate_passed": False,
+                   "provider_used": "error", "query_intent": intent,
+                   "fallback_triggered": True, "latency_ms": 0.0}
 
     async def _vector_search(
         self,
@@ -840,20 +993,28 @@ class RAGPipeline:
         Filtering to section="drug_interactions" means we search
         only relevant chunks — faster and more precise.
         """
-        # Map intents to ChromaDB section filters
-        intent_to_section: dict = {
+        # Map intents to ChromaDB section filters.
+        # IMPORTANT: only filter by section for high-specificity intents.
+        # For what_is_it and general_question — no section filter.
+        # Reason: section metadata varies by drug. Filtering by section="general"
+        # excludes valid chunks stored under different section names.
+        # Pure semantic search handles these better than metadata filtering.
+        section_filtered_intents: dict = {
             "interaction_check": "drug_interactions",
             "side_effects": "side_effects",
             "dosing": "dosing",
-            "what_is_it": "general",
+            # what_is_it and general_question: no section filter — pure semantic search
         }
 
-        section = intent_to_section.get(intent)
+        section = section_filtered_intents.get(intent)
 
-        # Use $in to retrieve chunks for ALL drugs in the query.
-        # Previously only drugs_mentioned[0] was used — for a warfarin + ibuprofen
-        # interaction check, warfarin chunks were excluded entirely.
-        drug_filter = {"drug_name": {"$in": drugs_mentioned}} if drugs_mentioned else None
+        # Drug name filter: only apply for interaction checks where we need
+        # chunks about SPECIFIC drugs. For informational queries, semantic
+        # search without drug filter retrieves better results.
+        if intent == "interaction_check" and drugs_mentioned:
+            drug_filter = {"drug_name": {"$in": drugs_mentioned}}
+        else:
+            drug_filter = None
 
         if section and drug_filter:
             return {"$and": [{"section": {"$eq": section}}, drug_filter]}
@@ -862,7 +1023,7 @@ class RAGPipeline:
         elif drug_filter:
             return drug_filter
 
-        return None  # no filter — search all chunks
+        return None  # no filter — pure semantic search
 
     def _build_context_string(self, chunks: list) -> str:
         """

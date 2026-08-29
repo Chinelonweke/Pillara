@@ -2,7 +2,7 @@
 // Central API client for all Pillara backend calls.
 // All components import from here — never fetch directly.
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000'
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 // ── Token management ─────────────────────────────────────────────────────────
 // Tokens live in localStorage for simplicity in dev.

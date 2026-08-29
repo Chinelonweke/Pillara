@@ -98,6 +98,13 @@ async def ai_query(
             "confidence_gate_passed": result.confidence_gate_passed,
             "provider": result.provider_used,
             "latency_ms": result.latency_ms,
+            "prompt_tokens": getattr(result, "prompt_tokens", 0),
+            "completion_tokens": getattr(result, "completion_tokens", 0),
+            "estimated_cost_usd": round(
+                (getattr(result, "prompt_tokens", 0) / 1_000_000 * 0.59) +
+                (getattr(result, "completion_tokens", 0) / 1_000_000 * 0.79),
+                6
+            ),
         },
     )
 

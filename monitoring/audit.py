@@ -32,6 +32,7 @@ class AuditEventType(str, Enum):
     MEDICATIONS_LISTED   = "medications_listed"
     INTERACTION_CHECKED  = "drug_interaction_checked"
     AI_QUERY_MADE        = "ai_query_made"
+    ACCOUNT_DELETED      = "account_deleted"
     VOICE_QUERY_MADE     = "voice_query_made"
     REPORT_GENERATED     = "medication_report_generated"
     REPORT_DOWNLOADED    = "medication_report_downloaded"

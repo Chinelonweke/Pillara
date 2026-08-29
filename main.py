@@ -1,7 +1,7 @@
 # main.py
 import asyncio
 from contextlib import asynccontextmanager
-from api.routers import auth, medications, interactions, ai_chat, reminders, profiles, reports, sharing
+from api.routers import auth, medications, interactions, ai_chat, reminders, profiles, reports, sharing, notifications
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -46,6 +46,15 @@ async def lifespan(app: FastAPI):
         logger.warning("chromadb_unavailable_at_startup", error=str(error))
 
     asyncio.create_task(_keep_neondb_awake())
+
+    # Pre-warm cross-encoder — eliminates 15-19s cold start on first request
+    try:
+        from ai.rag.pipeline import RAGPipeline
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, RAGPipeline.prewarm)
+        logger.info("cross_encoder_prewarmed")
+    except Exception as prewarm_error:
+        logger.warning("cross_encoder_prewarm_failed", error=str(prewarm_error))
 
     logger.info("pillara_ready", version=settings.APP_VERSION)
     yield
@@ -98,6 +107,7 @@ app.include_router(interactions.router, prefix="/api/v1/interactions", tags=["Dr
 app.include_router(ai_chat.router, prefix="/api/v1/ai", tags=["AI Assistant"])
 app.include_router(reminders.router, prefix="/api/v1/reminders", tags=["Reminders"])
 app.include_router(reports.router, prefix="/api/v1/reports", tags=["Reports"])
+app.include_router(notifications.router, prefix="/api/v1/notifications", tags=["Notifications"])
 
 
 @app.exception_handler(PillaraError)

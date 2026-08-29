@@ -62,6 +62,8 @@ class RAGResult:
     query_intent: str                # what we detected the user was asking
     drugs_mentioned: list            # drug names we extracted from the query
     latency_ms: float                # total pipeline time in milliseconds
+    prompt_tokens: int = 0           # tokens sent to LLM (for cost tracking)
+    completion_tokens: int = 0       # tokens received from LLM (for cost tracking)
     disclaimer: str = (
         "Please discuss this with your doctor or pharmacist "
         "before making any changes to your medications."
@@ -181,6 +183,47 @@ class QueryUnderstanding:
                 found_drugs.append(match_lower)
 
         return found_drugs
+
+    # Off-topic keywords — queries containing these are not about medications
+    OFF_TOPIC_KEYWORDS: set = {
+        "recipe", "cooking", "bake", "baking", "food", "weather", "forecast",
+        "sports", "football", "soccer", "basketball", "cricket",
+        "politics", "government", "election", "president",
+        "finance", "stock", "crypto", "bitcoin", "investment",
+        "relationship", "love", "dating", "marriage",
+        "movie", "film", "music", "song", "celebrity",
+        "travel", "hotel", "flight", "vacation",
+        "math", "calculate", "equation",
+        "joke", "funny", "humor",
+    }
+
+    def is_off_topic(self) -> bool:
+        """
+        Checks if the query is completely unrelated to medications.
+        Returns True if the query should be rejected before LLM call.
+
+        WHY THIS MATTERS:
+        Without this check, "how do I bake a cake?" would be classified as
+        general_question and sent to the LLM. The system prompt discourages
+        off-topic answers but doesn't guarantee it. This is a deterministic
+        guardrail that fires before any LLM cost is incurred.
+        """
+        # If query mentions any drug-related terms, it's not off-topic
+        drug_terms = {
+            "drug", "medication", "medicine", "pill", "tablet", "capsule",
+            "dose", "dosage", "prescription", "pharmacist", "pharmacy",
+            "side effect", "interaction", "allergy", "treatment", "symptom",
+            "antibiotic", "painkiller", "vitamin", "supplement",
+        }
+        if any(term in self.query_lower for term in drug_terms):
+            return False
+
+        # Also not off-topic if we detected drug names
+        if self.drugs_mentioned:
+            return False
+
+        # Check for off-topic keywords
+        return any(keyword in self.query_lower for keyword in self.OFF_TOPIC_KEYWORDS)
 
     def detect_intent(self) -> str:
         """
@@ -310,6 +353,28 @@ class RAGPipeline:
 
         # ── STEP 1: Query Understanding ────────────────────────────────────
         understanding = QueryUnderstanding(user_query)
+
+        # Off-topic guard — reject non-medication queries before any LLM cost
+        if understanding.is_off_topic():
+            logger.info("rag_off_topic_rejected", query_preview=user_query[:50])
+            return RAGResult(
+                response_text=(
+                    "I can only help with medication-related questions — "
+                    "drug interactions, side effects, dosage, and medication safety. "
+                    "For other topics, please consult appropriate resources."
+                ),
+                disclaimer="",
+                confidence_gate_passed=False,
+                fallback_triggered=True,
+                query_intent="off_topic",
+                chunks_retrieved=0,
+                reranked_chunks=0,
+                top_chunk_score=0.0,
+                provider_used="none",
+                latency_ms=0.0,
+                fallback_reason="off_topic",
+            )
+
         intent = understanding.detect_intent()
         drugs_mentioned = understanding.extract_drug_names()
         expanded_query = understanding.expand_query()
@@ -447,6 +512,8 @@ class RAGPipeline:
             query_intent=intent,
             drugs_mentioned=drugs_mentioned,
             latency_ms=round(total_latency, 2),
+            prompt_tokens=llm_result.get("prompt_tokens", 0),
+            completion_tokens=llm_result.get("completion_tokens", 0),
         )
 
     async def _vector_search(
@@ -1046,3 +1113,16 @@ Relevance Score: {chunk.final_score:.3f}
             request_id=request_id,
             confidence_gate="passed",
         )
+    @classmethod
+    def prewarm(cls) -> None:
+        """
+        Load the cross-encoder model at startup instead of on first request.
+        Eliminates the 15-19 second cold start on the first user query.
+        Call this from main.py lifespan before yield.
+        """
+        if not hasattr(cls, '_cross_encoder'):
+            from sentence_transformers import CrossEncoder
+            import logging
+            logging.getLogger(__name__).info("prewarming_cross_encoder_model")
+            cls._cross_encoder = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+            logging.getLogger(__name__).info("cross_encoder_ready")

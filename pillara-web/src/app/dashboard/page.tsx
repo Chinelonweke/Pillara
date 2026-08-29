@@ -121,8 +121,8 @@ function SharePanel({
   const isOwner = userRole === 'owner'
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-[#0F1B2D] border border-white/10 rounded-2xl w-full max-w-lg shadow-2xl">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-2 md:p-4 overflow-y-auto">
+      <div className="bg-[#0F1B2D] border border-white/10 rounded-2xl w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
           <div>
             <h2 className="text-white font-semibold">Share Profile</h2>
@@ -497,8 +497,8 @@ export default function DashboardPage() {
         />
       )}
 
-      <nav className="border-b border-white/10 px-8 py-4">
-        <div className="max-w-5xl mx-auto flex items-center justify-between">
+      <nav className="border-b border-white/10 px-4 md:px-8 py-4">
+        <div className="max-w-5xl mx-auto flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <div className="w-7 h-7 bg-[#4A9B8E] rounded-lg flex items-center justify-center">
               <span className="text-white font-bold text-xs">P</span>
@@ -560,7 +560,7 @@ export default function DashboardPage() {
               </div>
             )}
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 md:gap-4">
             {!user.is_verified && (
               <div className="flex items-center gap-2 bg-[#F59E0B]/10 border border-[#F59E0B]/20 rounded-lg px-3 py-1.5">
                 <span className="text-[#F59E0B] text-xs">⚠️ Check your email to verify your account</span>
@@ -582,12 +582,12 @@ export default function DashboardPage() {
             {profile && (
               <Link
                 href={`/reminders?profile_id=${profile.id}`}
-                className="text-slate-400 hover:text-white text-sm transition-colors"
+                className="hidden sm:block text-slate-400 hover:text-white text-sm transition-colors"
               >
                 Reminders
               </Link>
             )}
-            <Link href="/settings" className="text-slate-400 hover:text-white text-sm transition-colors">
+            <Link href="/settings" className="hidden sm:block text-slate-400 hover:text-white text-sm transition-colors">
               Settings
             </Link>
             <button onClick={handleLogout} className="text-slate-400 hover:text-white text-sm transition-colors">
@@ -597,7 +597,7 @@ export default function DashboardPage() {
         </div>
       </nav>
 
-      <main className="max-w-5xl mx-auto px-8 py-10">
+      <main className="max-w-5xl mx-auto px-4 md:px-8 py-6 md:py-10">
         <div className="mb-10 flex items-start justify-between">
           <div>
             <h1 className="text-2xl font-bold text-white mb-1">{profile?.name || 'My Medications'}</h1>
@@ -774,6 +774,15 @@ export default function DashboardPage() {
         </div>
 
         <div className="mt-10">
+          <div className="bg-[#1a2d47] border border-[#4A9B8E]/20 rounded-xl px-4 py-3 mb-4 flex items-start gap-3">
+            <span className="text-[#4A9B8E] text-sm mt-0.5 flex-shrink-0">ℹ️</span>
+            <p className="text-slate-400 text-xs leading-relaxed">
+              <strong className="text-slate-300">Informational use only.</strong>{' '}
+              Pillara provides medication information and is not a substitute for professional medical advice.
+              Always consult your doctor or pharmacist before making any medication decisions.{' '}
+              <a href="/privacy" className="text-[#4A9B8E] hover:underline">Privacy Policy</a>
+            </p>
+          </div>
           <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="text-white font-semibold">Ask the medication assistant</h2>
@@ -782,9 +791,9 @@ export default function DashboardPage() {
           </div>
 
           <div className="bg-white/5 border border-white/10 rounded-xl overflow-hidden">
-            <div className="h-80 overflow-y-auto p-4 space-y-4" id="chat-messages">
+            <div className="h-64 md:h-80 overflow-y-auto p-4 space-y-4" id="chat-messages">
               {chatMessages.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-center px-8">
+                <div className="h-full flex flex-col items-center justify-center text-center px-4 md:px-8">
                   <div className="w-12 h-12 bg-[#4A9B8E]/10 border border-[#4A9B8E]/20 rounded-full flex items-center justify-center mb-4">
                     <span className="text-[#4A9B8E] text-xl">💊</span>
                   </div>

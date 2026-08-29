@@ -10,7 +10,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 revision = '003_add_notifications'
-down_revision = '002_add_profile_sharing'
+down_revision = '002'
 branch_labels = None
 depends_on = None
 

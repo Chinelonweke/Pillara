@@ -76,6 +76,10 @@ chromadb==0.5.20                # vector database for drug knowledge base
 rank-bm25==0.2.2                # BM25 keyword search algorithm
                                 # Used in hybrid retrieval alongside vector search
 sentence-transformers==3.3.1    # cross-encoder re-ranking model
+# NOTE: sentence-transformers transitively pulls in torch (~427MB).
+# To install CPU-only torch (smaller Docker image), run BEFORE pip install:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+# The Dockerfile handles this via --extra-index-url.
                                 # Scores retrieved chunks for final re-ranking
 
 # ─── PDF GENERATION ───────────────────────────────────────────────────────────

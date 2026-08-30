@@ -57,34 +57,25 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-XSS-Protection"] = "1; mode=block"
 
-        # Skip CSP on docs routes — Swagger UI loads from CDN (dev only anyway)
-        if request.url.path not in ("/docs", "/redoc", "/openapi.json"):
-            response.headers["Content-Security-Policy"] = (
-                "default-src 'self'; "
-                "script-src 'self'; "
-                "style-src 'self' 'unsafe-inline'; "
-                "img-src 'self' data: https:; "
-                "connect-src 'self'; "
-                "font-src 'self'; "
-                "frame-ancestors 'none'"
-            )
-
         from core.config import settings
         if settings.is_production:
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
 
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Permissions-Policy"] = "camera=(), microphone=(self), geolocation=(), payment=()"
-        response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
-            "style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' data: https:; "
-            "connect-src 'self' https://api.pillara.site https://pillara.site; "
-            "font-src 'self' data:; "
-            "frame-ancestors 'none'; "
-            "base-uri 'self';"
-        )
+
+        # Single CSP block — skip on docs routes (Swagger UI needs unsafe-inline)
+        if request.url.path not in ("/docs", "/redoc", "/openapi.json"):
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; "
+                "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+                "style-src 'self' 'unsafe-inline'; "
+                "img-src 'self' data: https:; "
+                "connect-src 'self' https://api.pillara.site https://pillara.site; "
+                "font-src 'self' data:; "
+                "frame-ancestors 'none'; "
+                "base-uri 'self';"
+            )
 
         if "server" in response.headers:
             del response.headers["server"]

@@ -39,15 +39,16 @@ WORKDIR /build
 # re-run pip install. This makes rebuilds fast when you only changed code.
 COPY requirements.txt .
 
-# Install Python dependencies into a dedicated directory
+# Install CPU-only torch first to avoid pulling in CUDA toolkit (~2GB).
+# sentence-transformers (cross-encoder reranking) depends on torch.
+# Without this line, pip installs the full GPU build by default.
 RUN pip install --upgrade pip && \
-    pip install --no-cache-dir \
-    # --no-cache-dir: don't cache downloaded packages
-    # WHY: cached packages take space in the image but are never reused.
-    # In production Docker, each build downloads fresh — no cache benefit.
+    pip install --no-cache-dir --prefix=/install \
+        torch --index-url https://download.pytorch.org/whl/cpu
+
+# Install all other dependencies
+RUN pip install --no-cache-dir \
     --prefix=/install \
-    # --prefix=/install: install into /install instead of system Python
-    # This makes it easy to copy JUST the packages to the runtime stage
     -r requirements.txt
 
 
@@ -61,8 +62,7 @@ ENV PYTHONUNBUFFERED=1
 RUN apt-get update && apt-get install -y \
     libpq5 \
     # libpq5: PostgreSQL client library (runtime — no dev headers needed)
-    ffmpeg \
-    # ffmpeg: required by Whisper for audio processing (converting audio formats)
+    # ffmpeg removed — was required by Whisper (post-launch feature)
     curl \
     # Used by Docker healthcheck (CMD below)
     && rm -rf /var/lib/apt/lists/*

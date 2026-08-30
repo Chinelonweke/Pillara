@@ -230,7 +230,10 @@ class RateLimiter:
 
         except RedisError as error:
             logger.error("rate_limit_check_failed", error=str(error))
-            return True, 0, limit  # fail open on Redis error
+            # Fail closed — deny requests when Redis is unavailable.
+            # A Redis outage must not bypass rate limiting and allow abuse.
+            # Users will see a 429 error during the outage — acceptable trade-off.
+            return False, limit + 1, limit  # denied, over limit
 
     def make_auth_identifier(self, ip_hash: str, email: str) -> str:
         """

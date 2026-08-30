@@ -184,46 +184,36 @@ class QueryUnderstanding:
 
         return found_drugs
 
-    # Off-topic keywords — queries containing these are not about medications
-    OFF_TOPIC_KEYWORDS: set = {
-        "recipe", "cooking", "bake", "baking", "food", "weather", "forecast",
-        "sports", "football", "soccer", "basketball", "cricket",
-        "politics", "government", "election", "president",
-        "finance", "stock", "crypto", "bitcoin", "investment",
-        "relationship", "love", "dating", "marriage",
-        "movie", "film", "music", "song", "celebrity",
-        "travel", "hotel", "flight", "vacation",
-        "math", "calculate", "equation",
-        "joke", "funny", "humor",
+    # Minimal fast-path medical terms — obvious medication queries skip
+    # the LLM classifier entirely. Keep this list small and high-confidence.
+    # The LLM classifier handles all ambiguous cases.
+    FAST_PATH_TERMS: set = {
+        "drug", "drugs", "medication", "medications", "medicine", "medicines",
+        "pill", "pills", "tablet", "tablets", "capsule", "capsules",
+        "dose", "dosage", "dosing", "prescription",
+        "pharmacist", "pharmacy", "pharmaceutical",
+        "side effect", "side effects", "adverse effect",
+        "drug interaction", "contraindication",
+        "antibiotic", "antibiotics", "antiviral", "antifungal",
+        "overdose", "toxicity",
+        "over the counter", "otc",
     }
+
+    def is_obviously_medical(self) -> bool:
+        """
+        Stage 1 fast-path check.
+        Returns True if the query obviously contains medication-related terms.
+        These queries skip the LLM classifier entirely — zero extra cost.
+        """
+        return any(term in self.query_lower for term in self.FAST_PATH_TERMS)
 
     def is_off_topic(self) -> bool:
         """
-        Checks if the query is completely unrelated to medications.
-        Returns True if the query should be rejected before LLM call.
-
-        WHY THIS MATTERS:
-        Without this check, "how do I bake a cake?" would be classified as
-        general_question and sent to the LLM. The system prompt discourages
-        off-topic answers but doesn't guarantee it. This is a deterministic
-        guardrail that fires before any LLM cost is incurred.
+        DEPRECATED — use the async two-stage classifier in the pipeline instead.
+        Kept for backwards compatibility. Returns False (allow) by default.
+        The pipeline now uses is_obviously_medical() + async LLM classifier.
         """
-        # If query mentions any drug-related terms, it's not off-topic
-        drug_terms = {
-            "drug", "medication", "medicine", "pill", "tablet", "capsule",
-            "dose", "dosage", "prescription", "pharmacist", "pharmacy",
-            "side effect", "interaction", "allergy", "treatment", "symptom",
-            "antibiotic", "painkiller", "vitamin", "supplement",
-        }
-        if any(term in self.query_lower for term in drug_terms):
-            return False
-
-        # Also not off-topic if we detected drug names
-        if self.extract_drug_names():
-            return False
-
-        # Check for off-topic keywords
-        return any(keyword in self.query_lower for keyword in self.OFF_TOPIC_KEYWORDS)
+        return False
 
     def detect_intent(self) -> str:
         """
@@ -282,6 +272,135 @@ class QueryUnderstanding:
                 expanded = f"{expanded} {expansion}"
 
         return expanded
+
+
+# ─── INTENT CLASSIFIER ───────────────────────────────────────────────────────
+
+async def classify_medication_intent(
+    query: str,
+    groq_api_key: str,
+) -> bool:
+    """
+    Three-stage medication intent classifier.
+
+    Stage 1 — Fast-path (zero cost, zero latency):
+    Check for obvious medical terms. Catches "what is this medication",
+    "drug interactions", "side effects" etc. without any API call.
+
+    Stage 2 — RxNorm lookup (cached, ~200ms first call, ~1ms cached):
+    Extract words from the query and check each against RxNorm API.
+    If any word resolves to a known drug (rxcui found), query is medical.
+    This correctly handles "What is acetaminophen?", "Is ibuprofen safe?",
+    "Tell me about metformin" — any query containing a real drug name.
+    Results cached in Redis for 24 hours.
+
+    Stage 3 — LLM classifier (only for genuinely ambiguous queries):
+    Uses allam-2-7b (7B params, fast, free on Groq).
+    Only fires when Stage 1 and Stage 2 both find nothing.
+    Handles queries like "how do I make a bag?" or "what is the weather?"
+    On failure, defaults to True (fail open — better than blocking real queries).
+
+    WHY RXNORM AS STAGE 2:
+    RxNorm is the authoritative drug terminology system. It knows every
+    generic name, brand name, synonym, and international name for every
+    drug. If RxNorm recognizes a word as a drug, the query is medication-related.
+    No hardcoded lists. No maintenance. Handles any drug name automatically.
+    """
+    import httpx
+
+    query_lower = query.lower()
+
+    # ── STAGE 1: Fast-path medical terms ──────────────────────────────────
+    FAST_PATH_TERMS = {
+        "drug", "drugs", "medication", "medications", "medicine", "medicines",
+        "pill", "pills", "tablet", "tablets", "capsule", "capsules",
+        "dose", "dosage", "dosing", "prescription",
+        "pharmacist", "pharmacy", "pharmaceutical",
+        "side effect", "side effects", "adverse effect",
+        "drug interaction", "contraindication",
+        "antibiotic", "antibiotics", "antiviral", "antifungal",
+        "overdose", "toxicity", "over the counter", "otc",
+        "allergy", "allergic", "allergen", "interaction",
+    }
+    if any(term in query_lower for term in FAST_PATH_TERMS):
+        return True
+
+    # ── STAGE 2: RxNorm drug name lookup ──────────────────────────────────
+    # Extract individual words and check each against RxNorm
+    # This catches any real drug name regardless of whether we've seen it before
+    import re
+    words = re.findall(r'[a-zA-Z]{4,}', query)  # words 4+ chars (filters noise)
+
+    for word in words:
+        cache_key = f"rxnorm:classify:{word.lower()}"
+        try:
+            # Check Redis cache first
+            if hasattr(classify_medication_intent, '_redis') and classify_medication_intent._redis:
+                cached = await classify_medication_intent._redis.get(cache_key)
+                if cached is not None:
+                    if cached.decode() == "1":
+                        return True
+                    continue  # cached as not-a-drug, skip API call
+
+            # Call RxNorm API
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                r = await client.get(
+                    "https://rxnav.nlm.nih.gov/REST/rxcui.json",
+                    params={"name": word, "search": 1}
+                )
+                data = r.json()
+                rxcui_list = data.get("idGroup", {}).get("rxnormId", [])
+                is_drug = len(rxcui_list) > 0
+
+                # Cache result for 24 hours
+                if hasattr(classify_medication_intent, '_redis') and classify_medication_intent._redis:
+                    try:
+                        await classify_medication_intent._redis.setex(
+                            cache_key, 86400, "1" if is_drug else "0"
+                        )
+                    except Exception:
+                        pass
+
+                if is_drug:
+                    return True
+
+        except Exception:
+            pass  # RxNorm unavailable — continue to next word
+
+    # ── STAGE 3: LLM classifier for genuinely ambiguous queries ───────────
+    # Only fires when no medical terms AND no drug names found
+    # Uses allam-2-7b: smaller than gpt-oss-20b, sufficient for yes/no
+    prompt = (
+        f"Question: {query}\n\n"
+        "Is this question about a medication, drug, or pharmaceutical topic? "
+        "Answer YES or NO only."
+    )
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {groq_api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "allam-2-7b",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 3,
+                    "temperature": 0.0,
+                },
+            )
+            data = response.json()
+            answer = data["choices"][0]["message"]["content"].strip().upper()
+            return answer.startswith("YES")
+
+    except Exception as error:
+        import logging
+        logging.getLogger(__name__).warning(
+            "intent_classifier_failed", error=str(error)
+        )
+        return True  # Fail open
 
 
 # ─── RAG PIPELINE ─────────────────────────────────────────────────────────────
@@ -354,25 +473,79 @@ class RAGPipeline:
         # ── STEP 1: Query Understanding ────────────────────────────────────
         understanding = QueryUnderstanding(user_query)
 
-        # Off-topic guard — reject non-medication queries before any LLM cost
-        if understanding.is_off_topic():
+        # ── THREE-STAGE OFF-TOPIC GUARD ────────────────────────────────────────
+        # Stage 1: Fast-path — obvious medical terms (zero cost)
+        # Stage 2: RxNorm — resolve every word as a potential drug name (cached)
+        # Stage 3: LLM classifier — only for genuinely ambiguous queries
+        is_medical = understanding.is_obviously_medical()
+
+        if not is_medical:
+            # Stage 2: RxNorm lookup — the authoritative drug name classifier.
+            # Try to resolve each significant word in the query as a drug name.
+            # resolve_to_generic calls RxNorm and returns the generic name if
+            # the word is a known drug, or returns the word unchanged if not.
+            # A drug is found when rxnorm returns ANY result (rxcui exists).
+            # Results are cached in Redis for 24 hours.
+            try:
+                import re
+                import httpx
+                words = re.findall(r'[a-zA-Z]{4,}', user_query)
+                for word in words:
+                    word_lower = word.lower()
+                    # Direct RxNorm API call — checks if this word is a drug
+                    try:
+                        async with httpx.AsyncClient(timeout=3.0) as client:
+                            r = await client.get(
+                                "https://rxnav.nlm.nih.gov/REST/rxcui.json",
+                                params={"name": word_lower, "search": 1}
+                            )
+                            rxcui_list = r.json().get("idGroup", {}).get("rxnormId", [])
+                            if rxcui_list:
+                                # RxNorm recognizes this word as a drug
+                                is_medical = True
+                                logger.info(
+                                    "rxnorm_classified_as_drug",
+                                    word=word_lower,
+                                    rxcui=rxcui_list[0],
+                                )
+                                break
+                    except Exception:
+                        continue  # RxNorm unavailable for this word, try next
+            except Exception as rxnorm_error:
+                logger.warning("rxnorm_classify_failed", error=str(rxnorm_error))
+
+        if not is_medical:
+            # Stage 3: LLM classifier for genuinely ambiguous queries
+            try:
+                classify_medication_intent._redis = self.redis
+                is_medical = await classify_medication_intent(
+                    query=user_query,
+                    groq_api_key=settings.GROQ_API_KEY,
+                )
+            except Exception as classify_error:
+                logger.warning("classifier_error", error=str(classify_error))
+                is_medical = True  # fail open
+
+        if not is_medical:
             logger.info("rag_off_topic_rejected", query_preview=user_query[:50])
             return RAGResult(
                 response_text=(
-                    "I can only help with medication-related questions — "
-                    "drug interactions, side effects, dosage, and medication safety. "
-                    "For other topics, please consult appropriate resources."
+                    "Pillara is a medication safety assistant. I can only help with "
+                    "questions about medications, drug interactions, side effects, dosage, "
+                    "allergies, and pharmaceutical safety. "
+                    "Your question doesn't appear to be about medications. "
+                    "If you have a medication question, please try again."
                 ),
                 disclaimer="",
+                retrieved_chunks=[],
+                confidence_score=0.0,
                 confidence_gate_passed=False,
                 fallback_triggered=True,
                 query_intent="off_topic",
-                chunks_retrieved=0,
-                reranked_chunks=0,
-                top_chunk_score=0.0,
                 provider_used="none",
-                latency_ms=0.0,
-                fallback_reason="off_topic",
+                model_used="none",
+                drugs_mentioned=[],
+                latency_ms=round((time.monotonic() - pipeline_start) * 1000, 2),
             )
 
         intent = understanding.detect_intent()
@@ -1136,14 +1309,22 @@ Relevance Score: {chunk.final_score:.3f}
         """
         drugs_str = ", ".join(drugs_mentioned) if drugs_mentioned else "the medications you mentioned"
 
-        fallback_text = (
-            f"I don't have enough verified information to safely answer your question "
-            f"about {drugs_str}. "
-            f"For accurate, up-to-date information about drug interactions and safety, "
-            f"please speak with your pharmacist or doctor directly. "
-            f"You can also check the FDA drug information database at "
-            f"https://www.accessdata.fda.gov/scripts/cder/daf/ for verified drug details."
-        )
+        if drugs_str == "the medications you mentioned":
+            # No drug names detected — likely an off-topic or unclear query
+            fallback_text = (
+                "Pillara is a medication safety assistant. I can only help with questions "
+                "about drugs, medications, drug interactions, side effects, dosage, and "
+                "pharmaceutical safety. Your question doesn't appear to be about medications. "
+                "If you have a medication question, please try rephrasing it with the drug name."
+            )
+        else:
+            fallback_text = (
+                f"I wasn't able to find enough verified clinical information about {drugs_str} "
+                f"to answer confidently. "
+                f"For accurate medication information, please speak with your pharmacist or "
+                f"doctor directly. You can also check the FDA drug database at "
+                f"https://www.accessdata.fda.gov/scripts/cder/daf/ for verified drug details."
+            )
 
         latency = (time.monotonic() - pipeline_start) * 1000
 

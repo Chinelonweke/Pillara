@@ -39,16 +39,13 @@ WORKDIR /build
 # re-run pip install. This makes rebuilds fast when you only changed code.
 COPY requirements.txt .
 
-# Install CPU-only torch first to avoid pulling in CUDA toolkit (~2GB).
-# sentence-transformers (cross-encoder reranking) depends on torch.
-# Without this line, pip installs the full GPU build by default.
+# Install all dependencies with CPU-only torch.
+# --extra-index-url adds PyTorch's CPU wheel index alongside PyPI.
+# pip resolves torch to the CPU build, skipping CUDA (~2GB savings).
 RUN pip install --upgrade pip && \
-    pip install --no-cache-dir --prefix=/install \
-        torch --index-url https://download.pytorch.org/whl/cpu
-
-# Install all other dependencies
-RUN pip install --no-cache-dir \
+    pip install --no-cache-dir \
     --prefix=/install \
+    --extra-index-url https://download.pytorch.org/whl/cpu \
     -r requirements.txt
 
 

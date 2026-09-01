@@ -227,7 +227,6 @@ async def check_interactions(
         user_query=interaction_query,
         request_id=request_id,
     )
-    all_results = [result]
 
     from monitoring.analytics import track
     track("interaction_checked", user_id=str(current_user.id), properties={

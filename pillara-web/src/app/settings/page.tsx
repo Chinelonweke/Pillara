@@ -26,6 +26,23 @@ export default function SettingsPage() {
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
 
+  // Dark mode state — persisted in localStorage
+  const [darkMode, setDarkMode] = useState(false)
+
+  useEffect(() => {
+    const saved = localStorage.getItem('pillara_dark_mode')
+    const isDark = saved === 'true'
+    setDarkMode(isDark)
+    document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light')
+  }, [])
+
+  const toggleDarkMode = () => {
+    const newValue = !darkMode
+    setDarkMode(newValue)
+    localStorage.setItem('pillara_dark_mode', String(newValue))
+    document.documentElement.setAttribute('data-theme', newValue ? 'dark' : 'light')
+  }
+
   // Form fields
   const [name, setName] = useState('')
   const [dateOfBirth, setDateOfBirth] = useState('')
@@ -202,7 +219,7 @@ export default function SettingsPage() {
 
         <form onSubmit={handleSubmit} className="space-y-8">
           {/* Personal info */}
-          <div className="bg-white border border-[var(--border)] rounded-2xl p-6">
+          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-6">
             <h2 className="text-[var(--foreground)] font-semibold mb-5">Personal information</h2>
             <div className="space-y-4">
               <div>
@@ -215,7 +232,7 @@ export default function SettingsPage() {
                   onChange={(e) => setName(e.target.value)}
                   placeholder="e.g. Chinelo Nweke"
                   required
-                  className="w-full bg-white border border-[var(--border)] rounded-lg px-4 py-3 text-[var(--foreground)] placeholder-slate-500 focus:outline-none focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)] transition-colors text-sm"
+                  className="w-full bg-[var(--surface)] border border-[var(--border)] rounded-lg px-4 py-3 text-[var(--foreground)] placeholder-slate-500 focus:outline-none focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)] transition-colors text-sm"
                 />
               </div>
 
@@ -228,7 +245,7 @@ export default function SettingsPage() {
                     type="date"
                     value={dateOfBirth}
                     onChange={(e) => setDateOfBirth(e.target.value)}
-                    className="w-full bg-white border border-[var(--border)] rounded-lg px-4 py-3 text-[var(--foreground)] focus:outline-none focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)] transition-colors text-sm [color-scheme:dark]"
+                    className="w-full bg-[var(--surface)] border border-[var(--border)] rounded-lg px-4 py-3 text-[var(--foreground)] focus:outline-none focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)] transition-colors text-sm [color-scheme:dark]"
                   />
                 </div>
                 <div>
@@ -242,7 +259,7 @@ export default function SettingsPage() {
                     placeholder="e.g. 70"
                     min="1"
                     max="500"
-                    className="w-full bg-white border border-[var(--border)] rounded-lg px-4 py-3 text-[var(--foreground)] placeholder-slate-500 focus:outline-none focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)] transition-colors text-sm"
+                    className="w-full bg-[var(--surface)] border border-[var(--border)] rounded-lg px-4 py-3 text-[var(--foreground)] placeholder-slate-500 focus:outline-none focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)] transition-colors text-sm"
                   />
                 </div>
               </div>
@@ -258,7 +275,7 @@ export default function SettingsPage() {
                       className={`py-2.5 rounded-lg text-sm font-medium transition-colors border ${
                         gender === g
                           ? 'bg-[var(--primary)] border-[var(--primary)] text-[var(--foreground)]'
-                          : 'bg-white border-[var(--border)] text-[var(--foreground)] hover:border-[var(--primary)]/50'
+                          : 'bg-[var(--surface)] border-[var(--border)] text-[var(--foreground)] hover:border-[var(--primary)]/50'
                       }`}
                     >
                       {g}
@@ -270,7 +287,7 @@ export default function SettingsPage() {
           </div>
 
           {/* Allergies */}
-          <div className="bg-white border border-[var(--border)] rounded-2xl p-6">
+          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-6">
             <div className="flex items-start justify-between mb-1">
               <h2 className="text-[var(--foreground)] font-semibold">Known drug allergies</h2>
               {selectedAllergies.length > 0 && (
@@ -293,7 +310,7 @@ export default function SettingsPage() {
                   className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors border ${
                     selectedAllergies.includes(allergy)
                       ? 'bg-[#F59E0B] border-[#F59E0B] text-[#0F1B2D]'
-                      : 'bg-white border-[var(--border)] text-[var(--foreground)] hover:border-[#F59E0B]/50'
+                      : 'bg-[var(--surface)] border-[var(--border)] text-[var(--foreground)] hover:border-[#F59E0B]/50'
                   }`}
                 >
                   {selectedAllergies.includes(allergy) ? '✓ ' : ''}{allergy}
@@ -323,12 +340,12 @@ export default function SettingsPage() {
                 onChange={(e) => setCustomAllergy(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addCustomAllergy())}
                 placeholder="Add another allergy…"
-                className="flex-1 bg-white border border-[var(--border)] rounded-lg px-3 py-2 text-[var(--foreground)] placeholder-slate-500 focus:outline-none focus:border-[#F59E0B] focus:ring-1 focus:ring-[#F59E0B] transition-colors text-sm"
+                className="flex-1 bg-[var(--surface)] border border-[var(--border)] rounded-lg px-3 py-2 text-[var(--foreground)] placeholder-slate-500 focus:outline-none focus:border-[#F59E0B] focus:ring-1 focus:ring-[#F59E0B] transition-colors text-sm"
               />
               <button
                 type="button"
                 onClick={addCustomAllergy}
-                className="px-4 py-2 bg-white border border-[var(--border)] rounded-lg text-[var(--foreground)] hover:text-[var(--foreground)] transition-colors text-sm"
+                className="px-4 py-2 bg-[var(--surface)] border border-[var(--border)] rounded-lg text-[var(--foreground)] hover:text-[var(--foreground)] transition-colors text-sm"
               >
                 Add
               </button>
@@ -336,7 +353,7 @@ export default function SettingsPage() {
           </div>
 
           {/* Medical conditions */}
-          <div className="bg-white border border-[var(--border)] rounded-2xl p-6">
+          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-6">
             <div className="flex items-start justify-between mb-1">
               <h2 className="text-[var(--foreground)] font-semibold">Medical conditions</h2>
               {selectedConditions.length > 0 && (
@@ -360,7 +377,7 @@ export default function SettingsPage() {
                   className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors border ${
                     selectedConditions.includes(condition)
                       ? 'bg-[var(--primary)] border-[var(--primary)] text-[var(--foreground)]'
-                      : 'bg-white border-[var(--border)] text-[var(--foreground)] hover:border-[var(--primary)]/50'
+                      : 'bg-[var(--surface)] border-[var(--border)] text-[var(--foreground)] hover:border-[var(--primary)]/50'
                   }`}
                 >
                   {selectedConditions.includes(condition) ? '✓ ' : ''}{condition}
@@ -389,15 +406,41 @@ export default function SettingsPage() {
                 onChange={(e) => setCustomCondition(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addCustomCondition())}
                 placeholder="Add another condition…"
-                className="flex-1 bg-white border border-[var(--border)] rounded-lg px-3 py-2 text-[var(--foreground)] placeholder-slate-500 focus:outline-none focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)] transition-colors text-sm"
+                className="flex-1 bg-[var(--surface)] border border-[var(--border)] rounded-lg px-3 py-2 text-[var(--foreground)] placeholder-slate-500 focus:outline-none focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)] transition-colors text-sm"
               />
               <button
                 type="button"
                 onClick={addCustomCondition}
-                className="px-4 py-2 bg-white border border-[var(--border)] rounded-lg text-[var(--foreground)] hover:text-[var(--foreground)] transition-colors text-sm"
+                className="px-4 py-2 bg-[var(--surface)] border border-[var(--border)] rounded-lg text-[var(--foreground)] hover:text-[var(--foreground)] transition-colors text-sm"
               >
                 Add
               </button>
+            </div>
+          </div>
+
+          {/* App Preferences */}
+          <div className="rounded-xl border border-[var(--border)] overflow-hidden" style={{background: 'var(--surface)'}}>
+            <div className="px-5 py-4 border-b border-[var(--border)]">
+              <h2 className="font-semibold text-sm" style={{color: 'var(--foreground)'}}>App preferences</h2>
+            </div>
+            <div className="px-5 py-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium" style={{color: 'var(--foreground)'}}>Dark mode</p>
+                  <p className="text-xs mt-0.5" style={{color: 'var(--muted)'}}>Switch between light and dark theme</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={toggleDarkMode}
+                  className="relative w-12 h-6 rounded-full transition-colors duration-200 focus:outline-none"
+                  style={{background: darkMode ? 'var(--primary)' : 'var(--border)'}}
+                >
+                  <span
+                    className="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200"
+                    style={{transform: darkMode ? 'translateX(24px)' : 'translateX(0)'}}
+                  />
+                </button>
+              </div>
             </div>
           </div>
 
@@ -405,7 +448,7 @@ export default function SettingsPage() {
           <div className="flex gap-3">
             <Link
               href="/dashboard"
-              className="flex-1 text-center bg-white border border-[var(--border)] hover:bg-[var(--primary-light)] text-[var(--foreground)] py-3 rounded-lg font-medium transition-colors text-sm"
+              className="flex-1 text-center bg-[var(--surface)] border border-[var(--border)] hover:bg-[var(--primary-light)] text-[var(--foreground)] py-3 rounded-lg font-medium transition-colors text-sm"
             >
               Cancel
             </Link>

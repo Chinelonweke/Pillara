@@ -49,7 +49,7 @@ export default function LoginPage() {
 
         <div>
           <div className="flex items-center gap-2 mb-16">
-            <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
+            <div className="w-10 h-10 rounded-xl bg-[var(--surface)]/20 flex items-center justify-center">
               <span className="text-white font-bold">P</span>
             </div>
             <span className="text-white font-bold text-xl">Pillara</span>
@@ -68,7 +68,7 @@ export default function LoginPage() {
             { icon: '✓', text: 'Verified FDA + RxNorm data' },
           ].map(({ icon, text }) => (
             <div key={text} className="flex items-center gap-3">
-              <div className="w-6 h-6 rounded-full bg-white/20 flex items-center justify-center text-xs text-white font-bold">
+              <div className="w-6 h-6 rounded-full bg-[var(--surface)]/20 flex items-center justify-center text-xs text-white font-bold">
                 {icon}
               </div>
               <span className="text-blue-100 text-sm">{text}</span>

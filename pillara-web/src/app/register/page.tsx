@@ -34,7 +34,7 @@ export default function RegisterPage() {
         body: JSON.stringify({ email, password }),
       })
       const data = await res.json()
-      if (!res.ok) throw new APIError(res.status, data.message || 'Registration failed',  data.error)
+      if (!res.ok) throw new APIError(res.status, data.message || 'Registration failed', data.error)
       localStorage.setItem('pillara_access_token', data.access_token)
       if (data.refresh_token) localStorage.setItem('pillara_refresh_token', data.refresh_token)
       router.push('/onboarding')
@@ -62,7 +62,7 @@ export default function RegisterPage() {
 
         <div>
           <div className="flex items-center gap-2 mb-16">
-            <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
+            <div className="w-10 h-10 rounded-xl bg-[var(--surface)]/20 flex items-center justify-center">
               <span className="text-white font-bold">P</span>
             </div>
             <span className="text-white font-bold text-xl">Pillara</span>

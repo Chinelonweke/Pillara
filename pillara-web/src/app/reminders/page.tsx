@@ -181,7 +181,7 @@ function RemindersContent() {
         </div>
 
         {showAddForm && (
-          <div className="bg-white border border-[var(--border)] rounded-2xl p-6 mb-8">
+          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-6 mb-8">
             <div className="flex items-center justify-between mb-5">
               <h2 className="text-[var(--foreground)] font-semibold">New reminder</h2>
               <button onClick={() => setShowAddForm(false)} className="text-[var(--muted)] hover:text-[var(--foreground)] text-lg">✕</button>
@@ -222,7 +222,7 @@ function RemindersContent() {
                   value={reminderTime}
                   onChange={e => setReminderTime(e.target.value)}
                   required
-                  className="w-full bg-white border border-[var(--border)] rounded-lg px-4 py-2.5 text-[var(--foreground)] focus:outline-none focus:border-[var(--primary)] text-sm"
+                  className="w-full bg-[var(--surface)] border border-[var(--border)] rounded-lg px-4 py-2.5 text-[var(--foreground)] focus:outline-none focus:border-[var(--primary)] text-sm"
                 />
               </div>
 
@@ -235,7 +235,7 @@ function RemindersContent() {
                     className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors ${
                       isRecurring && frequency === 'FREQ=DAILY'
                         ? 'bg-[var(--primary)] text-[var(--foreground)]'
-                        : 'bg-white border border-[var(--border)] text-[var(--foreground)] hover:border-[var(--primary)]/50'
+                        : 'bg-[var(--surface)] border border-[var(--border)] text-[var(--foreground)] hover:border-[var(--primary)]/50'
                     }`}
                   >
                     Daily
@@ -246,7 +246,7 @@ function RemindersContent() {
                     className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors ${
                       isRecurring && frequency === 'FREQ=WEEKLY'
                         ? 'bg-[var(--primary)] text-[var(--foreground)]'
-                        : 'bg-white border border-[var(--border)] text-[var(--foreground)] hover:border-[var(--primary)]/50'
+                        : 'bg-[var(--surface)] border border-[var(--border)] text-[var(--foreground)] hover:border-[var(--primary)]/50'
                     }`}
                   >
                     Weekly
@@ -257,7 +257,7 @@ function RemindersContent() {
                     className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors ${
                       !isRecurring
                         ? 'bg-[var(--primary)] text-[var(--foreground)]'
-                        : 'bg-white border border-[var(--border)] text-[var(--foreground)] hover:border-[var(--primary)]/50'
+                        : 'bg-[var(--surface)] border border-[var(--border)] text-[var(--foreground)] hover:border-[var(--primary)]/50'
                     }`}
                   >
                     Once
@@ -265,7 +265,7 @@ function RemindersContent() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-3 bg-white border border-[var(--border)] rounded-lg px-4 py-3">
+              <div className="flex items-center gap-3 bg-[var(--surface)] border border-[var(--border)] rounded-lg px-4 py-3">
                 <input
                   type="checkbox"
                   id="notify_email"
@@ -312,7 +312,7 @@ function RemindersContent() {
             {reminders.map(reminder => (
               <div
                 key={reminder.id}
-                className="bg-white border border-[var(--border)] rounded-xl px-5 py-4 flex items-center justify-between group"
+                className="bg-[var(--surface)] border border-[var(--border)] rounded-xl px-5 py-4 flex items-center justify-between group"
               >
                 <div className="flex items-center gap-4">
                   <div className="w-10 h-10 bg-[var(--primary)]/10 border border-[var(--primary)]/20 rounded-full flex items-center justify-center flex-shrink-0">
@@ -344,12 +344,12 @@ function RemindersContent() {
                     </div>
                     <div className="flex items-center gap-2 mt-1">
                       {reminder.notify_email && (
-                        <span className="text-xs bg-white border border-[var(--border)] rounded-full px-2 py-0.5 text-[var(--muted)]">
+                        <span className="text-xs bg-[var(--surface)] border border-[var(--border)] rounded-full px-2 py-0.5 text-[var(--muted)]">
                           📧 Email
                         </span>
                       )}
                       {reminder.notify_push && (
-                        <span className="text-xs bg-white border border-[var(--border)] rounded-full px-2 py-0.5 text-[var(--muted)]">
+                        <span className="text-xs bg-[var(--surface)] border border-[var(--border)] rounded-full px-2 py-0.5 text-[var(--muted)]">
                           🔔 Push
                         </span>
                       )}

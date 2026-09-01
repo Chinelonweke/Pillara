@@ -16,7 +16,15 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <script dangerouslySetInnerHTML={{__html: `
+        (function() {
+          try {
+            var dark = localStorage.getItem('pillara_dark_mode') === 'true';
+            document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+          } catch(e) {}
+        })();
+      `}} />
       <body className={inter.className}>
         <AuthProvider>
           {children}

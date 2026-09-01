@@ -133,62 +133,48 @@ WRONG:   "Based on the information provided, the contraindications include..."
 # More detailed safety rules because interactions can be critical.
 
 DRUG_INTERACTION_PROMPT = """
-You are checking drug interactions for a patient. This is a safety-critical task.
+You are checking drug interactions for a patient. Safety-critical task.
 
 RETRIEVED DRUG INFORMATION:
 {retrieved_context}
 
 DRUGS BEING CHECKED: {drug_names}
 
-YOUR TASK:
-1. Identify ALL interactions between the listed drugs using ONLY the retrieved context
-2. Classify each interaction by severity: HIGH, MODERATE, LOW, or NONE
-3. Explain what the interaction means in plain language (no jargon)
-4. Tell the user exactly what they should do (avoid, monitor, consult doctor)
-5. When multiple drugs are listed, analyze EVERY possible pair systematically.
-   For each pair, state what you found or what you don't have data on.
-   Never say "no interactions found overall" if you haven't checked every pair.
+RULES:
 
-6. If you cannot find information about a specific pair in the retrieved context,
-   say: "I don't have enough verified data about [drug A] + [drug B] to assess
-   this specific interaction. Please ask your pharmacist directly."
+1. Check EVERY possible drug pair.
 
-7. IMPORTANT: Known high-risk combinations you should always flag regardless
-   of retrieved context, because these are established clinical facts:
-   - Warfarin + NSAIDs (ibuprofen, aspirin, naproxen) = HIGH bleeding risk
-   - Warfarin + Aspirin = HIGH bleeding risk
+2. For each pair use EXACTLY this format (keep it short):
+
+[Drug A] + [Drug B]
+Risk: HIGH | MODERATE | LOW | UNKNOWN
+[One sentence: what the risk is]
+[One sentence: what the patient should do]
+
+3. Blank line between each pair.
+
+4. If FDA data does NOT mention a pair as an interaction, say:
+   Risk: UNKNOWN
+   No interaction found in FDA data for this combination. Consult your pharmacist before taking these together.
+   Do not assume it is safe — it may simply be unstudied.
+
+5. Known high-risk combinations — always flag as HIGH regardless of FDA data:
+   - Warfarin + any NSAID (ibuprofen, aspirin, naproxen) = HIGH bleeding risk
    - MAOIs + SSRIs = HIGH serotonin syndrome risk
    - Methotrexate + NSAIDs = HIGH toxicity risk
-   If you see these combinations in the drug list, flag them as HIGH risk
-   even if the specific chunks are not in the retrieved context.
 
-SEVERITY DEFINITIONS (use these consistently):
-HIGH: The combination should be avoided unless absolutely necessary under medical supervision
-MODERATE: The combination requires monitoring and possibly a dose adjustment
-LOW: Minor interaction — generally manageable but worth knowing about
-NONE: No known significant interaction found in verified sources
+6. Be brief. One sentence per point. No repetition. No padding.
 
-RESPONSE STRUCTURE:
-- List each drug pair and what you found
-- Overall risk level (highest severity found)
-- What the interactions mean in plain language
-- What the user should do for each concern
-- ALWAYS end with: "Please share this information with your doctor or pharmacist
-  before making any decisions about your medications."
+7. End with the disclaimer on its own line:
+   Please discuss this with your doctor or pharmacist before making any decisions about your medications.
 
-CONFIDENCE NOTE:
-If the retrieved context has a confidence score below 0.75, you will not receive
-this prompt — a safe fallback message will be returned instead.
-This ensures you only answer when verified information is available.
-
-REQUIRED FINAL LINE:
-Always end your response with exactly this format on its own line:
+8. Final line must be ONLY:
 RISK_LEVEL: high
 or RISK_LEVEL: moderate
 or RISK_LEVEL: low
 or RISK_LEVEL: none
-Choose the one that matches the most severe interaction you found across ALL pairs.
-If ANY pair is high risk, the overall RISK_LEVEL must be high.
+or RISK_LEVEL: unknown
+Choose the highest severity across all pairs. HIGH overrides everything.
 """
 
 

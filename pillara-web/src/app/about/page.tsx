@@ -32,7 +32,7 @@ export default function AboutPage() {
             <h2 className="text-[var(--foreground)] font-semibold text-xl mb-4">The problem we&apos;re solving</h2>
             <p>
               Polypharmacy — taking multiple medications at the same time — is one of the leading causes of
-              preventable hospital admissions worldwide. In Nigeria, where pharmacist density is low and
+              preventable hospital admissions worldwide. In many regions where pharmacist density is low and
               self-medication is common, patients frequently combine medications without knowing the risks.
             </p>
             <p className="mt-3">

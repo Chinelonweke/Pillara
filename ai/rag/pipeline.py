@@ -441,6 +441,7 @@ class RAGPipeline:
         conversation_history: Optional[list] = None,
         is_voice: bool = False,
         request_id: str = "unknown",
+        max_tokens: Optional[int] = None,
     ) -> RAGResult:
         """
         Main entry point for the RAG pipeline.
@@ -655,6 +656,7 @@ class RAGPipeline:
             system_prompt=system_prompt,
             complexity=complexity,
             request_id=request_id,
+            max_tokens_override=max_tokens,
         )
 
         # ── STEP 11: Strip HTML from LLM output (XSS prevention) ────────

@@ -55,7 +55,7 @@ export default function LandingPage() {
 
       {/* Top announcement bar */}
       <div style={{background: 'var(--primary)', color: 'white'}} className="text-center py-2 text-xs font-medium">
-        🇳🇬 Built for Nigerian patients and caregivers — NDPR compliant · Free to use
+        Built for patients and caregivers everywhere — NDPR compliant · Free to use
       </div>
 
       {/* Navigation */}
@@ -378,7 +378,7 @@ export default function LandingPage() {
               Create free account
             </Link>
             <p className="text-xs mt-4" style={{color: 'var(--muted)'}}>
-              NDPR compliant · Built in Nigeria 🇳🇬
+              NDPR compliant
             </p>
           </div>
         </div>
@@ -396,7 +396,7 @@ export default function LandingPage() {
                 <span className="font-bold text-white">Pillara</span>
               </div>
               <p className="text-xs leading-relaxed" style={{color: '#9CA3AF'}}>
-                AI-powered medication safety for patients, caregivers, and healthcare workers in Nigeria and beyond.
+                AI-powered medication safety for patients, caregivers, and healthcare workers everywhere.
               </p>
             </div>
             <div>
@@ -430,7 +430,7 @@ export default function LandingPage() {
           <div className="pt-6 flex flex-col md:flex-row items-center justify-between gap-4"
             style={{borderTop: '1px solid #374151'}}>
             <p className="text-xs" style={{color: '#6B7280'}}>© 2026 Pillara Health. All rights reserved.</p>
-            <p className="text-xs" style={{color: '#6B7280'}}>Built in Nigeria 🇳🇬</p>
+            <p className="text-xs" style={{color: '#6B7280'}}></p>
           </div>
         </div>
       </footer>

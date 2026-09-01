@@ -352,6 +352,9 @@ export default function DashboardPage() {
     loadData()
   }, [user])
 
+  // Confirmation modal state for medication deletion
+  const [deleteConfirm, setDeleteConfirm] = useState<{id: string, name: string} | null>(null)
+
   const handleDeleteMedication = async (medicationId: string) => {
     try {
       await medications.delete(medicationId)
@@ -487,6 +490,46 @@ export default function DashboardPage() {
   }
 
   return (
+    <>
+    {/* Delete confirmation modal */}
+    {deleteConfirm && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        style={{background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(4px)'}}>
+        <div className="w-full max-w-sm rounded-2xl p-6"
+          style={{background: 'var(--surface)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-lg)'}}>
+          <div className="text-center mb-5">
+            <div className="w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3"
+              style={{background: '#FEF2F2'}}>
+              <span className="text-xl">🗑️</span>
+            </div>
+            <h3 className="font-semibold text-base mb-1" style={{color: 'var(--foreground)'}}>
+              Remove medication?
+            </h3>
+            <p className="text-sm" style={{color: 'var(--muted)'}}>
+              <span className="font-medium capitalize" style={{color: 'var(--foreground)'}}>{deleteConfirm.name}</span>
+              {' '}will be permanently removed from your medication list.
+            </p>
+          </div>
+          <div className="flex gap-3">
+            <button
+              onClick={() => setDeleteConfirm(null)}
+              className="flex-1 py-2.5 rounded-xl text-sm font-medium transition-all"
+              style={{background: 'var(--background)', border: '1.5px solid var(--border)', color: 'var(--foreground)'}}>
+              Cancel
+            </button>
+            <button
+              onClick={() => {
+                handleDeleteMedication(deleteConfirm.id)
+                setDeleteConfirm(null)
+              }}
+              className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90"
+              style={{background: '#EF4444'}}>
+              Delete
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
     <div className="min-h-screen" style={{background: "var(--background)"}}>
       {showSharePanel && profile && (
         <SharePanel
@@ -655,7 +698,7 @@ export default function DashboardPage() {
                     <div className="flex items-center gap-3">
                       <div className="w-2 h-2 bg-[var(--primary)] rounded-full" />
                       <button
-                        onClick={() => handleDeleteMedication(med.id)}
+                        onClick={() => setDeleteConfirm({id: med.id, name: med.name})}
                         className="opacity-0 group-hover:opacity-100 text-[var(--muted)] hover:text-red-400 transition-all text-xs"
                         title="Remove medication"
                       >
@@ -754,8 +797,28 @@ export default function DashboardPage() {
                 )}
 
                 <div className="bg-white border border-[var(--border)] rounded-xl p-4">
-                  <p className="text-[var(--foreground)] text-xs font-medium mb-3 uppercase tracking-wide">Analysis</p>
-                  <p className="text-[var(--foreground)] text-sm leading-7">{stripMarkdown(checkResult.summary)}</p>
+                  <p className="text-[var(--foreground)] text-xs font-medium mb-4 uppercase tracking-wide">Analysis</p>
+                  <div className="space-y-4">
+                    {stripMarkdown(checkResult.summary)
+                      .split(/\n\n+/)
+                      .filter((block: string) => block.trim().length > 0)
+                      .map((block: string, i: number) => {
+                        const isHighRisk = block.toLowerCase().includes('risk: high') || block.toLowerCase().includes('severity: high')
+                        const isModerate = block.toLowerCase().includes('risk: moderate') || block.toLowerCase().includes('severity: moderate')
+                        const isSafe = block.toLowerCase().includes('risk: safe') || block.toLowerCase().includes('no known interaction')
+                        const borderColor = isHighRisk ? '#FCA5A5' : isModerate ? '#FCD34D' : isSafe ? '#86EFAC' : 'var(--border)'
+                        const bgColor = isHighRisk ? '#FFF5F5' : isModerate ? '#FFFBEB' : isSafe ? '#F0FDF4' : 'transparent'
+                        return (
+                          <div key={i} className="p-3 rounded-xl text-sm leading-relaxed"
+                            style={{border: `1px solid ${borderColor}`, background: bgColor, color: 'var(--foreground)'}}>
+                            {block.split('\n').map((line: string, j: number) => (
+                              <p key={j} className={j === 0 ? 'font-semibold mb-1' : 'mt-0.5'}>{line}</p>
+                            ))}
+                          </div>
+                        )
+                      })
+                    }
+                  </div>
                 </div>
 
                 <p className="text-[var(--muted)] text-xs leading-relaxed px-1">{checkResult.disclaimer}</p>
@@ -903,5 +966,6 @@ export default function DashboardPage() {
         </div>
       </main>
     </div>
+  </>
   )
 }

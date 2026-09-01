@@ -226,6 +226,7 @@ async def check_interactions(
     result = await pipeline.query(
         user_query=interaction_query,
         request_id=request_id,
+        max_tokens=2048,  # Interaction checks need more tokens — 6 pairs × ~150 tokens each
     )
 
     from monitoring.analytics import track

@@ -34,7 +34,7 @@ export default function RegisterPage() {
         body: JSON.stringify({ email, password }),
       })
       const data = await res.json()
-      if (!res.ok) throw new APIError(res.status, data.error, data.message || 'Registration failed')
+      if (!res.ok) throw new APIError(res.status, data.message || 'Registration failed',  data.error)
       localStorage.setItem('pillara_access_token', data.access_token)
       if (data.refresh_token) localStorage.setItem('pillara_refresh_token', data.refresh_token)
       router.push('/onboarding')
@@ -69,7 +69,7 @@ export default function RegisterPage() {
           </div>
           <h2 className="text-3xl font-bold text-white mb-4">Start your medication safety journey</h2>
           <p className="text-teal-100 leading-relaxed">
-            Join thousands of Nigerians managing their medications safely with AI-powered insights.
+            Join thousands of patients and caregivers managing their medications safely with AI-powered insights.
           </p>
         </div>
 

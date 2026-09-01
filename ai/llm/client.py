@@ -159,7 +159,7 @@ class LLMClient:
         )
         return text
 
-    async def _call_openai_compatible_provider(self, provider_config: dict, model: str, messages: list, system_prompt: str) -> str:
+    async def _call_openai_compatible_provider(self, provider_config: dict, model: str, messages: list, system_prompt: str, max_tokens_override: int = None) -> str:
         api_key = self._get_api_key(provider_config)
         if not api_key:
             raise ValueError(f"No API key configured for {provider_config['name']}")
@@ -178,7 +178,7 @@ class LLMClient:
             client.chat.completions.create(
                 model=model,
                 messages=full_messages,
-                max_tokens=settings.LLM_MAX_TOKENS,
+                max_tokens=max_tokens_override or settings.LLM_MAX_TOKENS,
                 temperature=settings.LLM_TEMPERATURE,
             ),
             timeout=provider_config["timeout_seconds"]
@@ -197,7 +197,7 @@ class LLMClient:
         )
         return response_text
 
-    async def _try_openrouter_models(self, provider_config: dict, model_list: list, messages: list, system_prompt: str) -> str:
+    async def _try_openrouter_models(self, provider_config: dict, model_list: list, messages: list, system_prompt: str, max_tokens_override: int = None) -> str:
         last_error = None
         for attempt_number, model in enumerate(model_list, start=1):
             try:
@@ -205,13 +205,14 @@ class LLMClient:
                 return await self._call_openai_compatible_provider(
                     provider_config=provider_config, model=model,
                     messages=messages, system_prompt=system_prompt,
+                    max_tokens_override=max_tokens_override,
                 )
             except Exception as error:
                 last_error = error
                 logger.warning("openrouter_model_failed", model=model, attempt=attempt_number, error=str(error))
         raise last_error
 
-    async def complete(self, messages: list, system_prompt: str, complexity: QueryComplexity = QueryComplexity.COMPLEX, request_id: str = "unknown") -> dict:
+    async def complete(self, messages: list, system_prompt: str, complexity: QueryComplexity = QueryComplexity.COMPLEX, request_id: str = "unknown", max_tokens_override: int = None) -> dict:
         last_error = None
         providers_tried = []
 
@@ -254,12 +255,14 @@ class LLMClient:
                     response_text = await self._try_openrouter_models(
                         provider_config=provider_config, model_list=model_for_complexity,
                         messages=messages, system_prompt=system_prompt,
+                        max_tokens_override=max_tokens_override,
                     )
                     model_used = "openrouter_free_model"
                 else:
                     response_text = await self._call_openai_compatible_provider(
                         provider_config=provider_config, model=model_for_complexity,
                         messages=messages, system_prompt=system_prompt,
+                        max_tokens_override=max_tokens_override,
                     )
                     model_used = model_for_complexity
 

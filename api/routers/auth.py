@@ -351,11 +351,12 @@ async def delete_account(
     user_id = str(current_user.id)
 
     # Log before deletion
+    from monitoring.audit import AuditOutcome
     audit = AuditLogger(db=db)
     await audit.log(
         event_type=AuditEventType.ACCOUNT_DELETED,
         user_id=user_id,
-        outcome="success",
+        outcome=AuditOutcome.SUCCESS,
     )
     await db.commit()
 

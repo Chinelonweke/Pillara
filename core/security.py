@@ -243,7 +243,8 @@ def strip_llm_output_html(text: str) -> str:
     try:
         text = text.encode('latin-1').decode('utf-8')
     except (UnicodeDecodeError, UnicodeEncodeError) as enc_err:
-        import logging; logging.getLogger(__name__).debug("text_encoding_fallback", extra={"error": str(enc_err)})
+        import logging
+        logging.getLogger(__name__).debug("text_encoding_fallback", extra={"error": str(enc_err)})
     # Replace problematic Unicode characters with clean ASCII
     text = (text
         .replace('—', ' - ').replace('–', '-')

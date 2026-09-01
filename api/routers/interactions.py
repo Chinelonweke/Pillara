@@ -54,8 +54,8 @@ async def check_interactions(
             if cached:
                 logger.info("interaction_cache_hit", drugs=sanitized_drugs)
                 return InteractionCheckResponse(**json.loads(cached))
-        except Exception:
-            pass  # Cache miss or Redis error — proceed normally
+        except Exception as cache_error:
+            logger.debug("interaction_cache_read_failed", error=str(cache_error))
 
     # ── STEP 1: Resolve profile context ───────────────────────────────────────
     all_drugs = list(sanitized_drugs)
@@ -119,14 +119,115 @@ async def check_interactions(
             request_id=request_id,
         )
 
-    # ── STEP 3: LLM/RAG pipeline ───────────────────────────────────────────────
+    # ── STEP 3: openFDA drug label interaction lookup ─────────────────────────
+    # openFDA returns the official FDA drug label "drug_interactions" section
+    # for each drug — explicit clinical interaction warnings by name.
+    # Free, no API key required, maintained by FDA.
+    # This gives the LLM verified interaction text to reason from.
+    import httpx
+    fda_interaction_context = []
+
+    for drug in all_drugs:
+        cache_key = f"fda:interactions:{drug.lower()}"
+        cached_text = None
+
+        # Check Redis cache first
+        if redis:
+            try:
+                cached = await redis.get(cache_key)
+                if cached:
+                    cached_text = cached.decode()
+            except Exception:
+                pass
+
+        if cached_text:
+            fda_interaction_context.append(f"{drug.upper()} (FDA label interactions):\n{cached_text}")
+            continue
+
+        # Query openFDA drug label API — fail loudly on any error
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            # Try generic_name first, then brand_name as fallback
+            fda_url = "https://api.fda.gov/drug/label.json"
+            search_queries = [
+                f"openfda.generic_name:{drug}",
+                f"openfda.brand_name:{drug}",
+                f"openfda.substance_name:{drug}",
+            ]
+            interactions_text = ""
+            for search_q in search_queries:
+                r = await client.get(fda_url, params={"search": search_q, "limit": 1})
+                logger.info(
+                    "fda_label_query",
+                    drug=drug,
+                    search=search_q,
+                    status=r.status_code,
+                )
+                if r.status_code == 200:
+                    results = r.json().get("results", [])
+                    if results:
+                        interactions_text = results[0].get("drug_interactions", [""])[0]
+                        if interactions_text:
+                            break  # Found it — stop trying other queries
+
+            if interactions_text:
+                # Clean encoding — fix mojibake from double-encoded UTF-8
+                # The FDA API sometimes returns text that was encoded twice
+                try:
+                    # Try to fix mojibake: re-encode as latin-1 then decode as utf-8
+                    interactions_text = interactions_text.encode('latin-1').decode('utf-8')
+                except (UnicodeDecodeError, UnicodeEncodeError):
+                    pass
+                # Replace special characters with clean ASCII equivalents
+                interactions_text = (
+                    interactions_text
+                    .replace('—', '-')      # em dash → hyphen
+                    .replace('–', '-')      # en dash → hyphen
+                    .replace('’', "'")      # right single quote → apostrophe
+                    .replace('‘', "'")      # left single quote → apostrophe
+                    .replace('“', '"')      # left double quote
+                    .replace('”', '"')      # right double quote
+                    .replace('®', '')       # registered trademark → remove
+                    .replace('±', '+/-')    # plus-minus
+                    .replace(' ', ' ')      # non-breaking space → space
+                    .replace('•', '-')      # bullet → hyphen
+                )
+                truncated = interactions_text[:800]
+                label = f"{drug.upper()} (FDA label interactions):\n{truncated}"
+                fda_interaction_context.append(label)
+                logger.info(
+                    "fda_interaction_label_fetched",
+                    drug=drug,
+                    text_length=len(interactions_text),
+                )
+                # Cache for 24 hours
+                if redis:
+                    await redis.setex(cache_key, 86400, truncated)
+            else:
+                logger.warning(
+                    "fda_interaction_label_not_found",
+                    drug=drug,
+                    message="No drug_interactions field found in FDA label",
+                )
+
+    # ── STEP 4: LLM/RAG pipeline ───────────────────────────────────────────────
     pipeline = RAGPipeline(redis=redis)
-    interaction_query = f"drug interactions between {' and '.join(all_drugs)}"
+    drug_list = ", ".join(all_drugs)
+
+    if fda_interaction_context:
+        # Prepend FDA label data to the query so RAG retrieval is anchored
+        fda_context_str = "\n\n".join(fda_interaction_context)
+        interaction_query = (
+            f"drug interactions safety warnings for {drug_list}.\n\n"
+            f"VERIFIED FDA DRUG LABEL INTERACTION DATA:\n{fda_context_str}"
+        )
+    else:
+        interaction_query = f"drug interactions safety warnings for {drug_list}"
 
     result = await pipeline.query(
         user_query=interaction_query,
         request_id=request_id,
     )
+    all_results = [result]
 
     from monitoring.analytics import track
     track("interaction_checked", user_id=str(current_user.id), properties={
@@ -149,10 +250,9 @@ async def check_interactions(
         },
     )
 
-        # ── STEP 5: Determine overall risk ────────────────────────────────────────
+    # ── STEP 5: Determine overall risk ────────────────────────────────────────
     # Allergy warnings are deterministic — always highest priority.
     # For LLM risk: extract structured RISK_LEVEL tag from response.
-    # Substring matching is negation-blind ("not high risk" matches "high").
     import re
     if allergy_warnings:
         overall_risk = "high"
@@ -190,7 +290,7 @@ async def check_interactions(
     if not body.profile_id and not allergy_warnings:
         try:
             await redis.setex(cache_key, 86400, json.dumps(response_data.model_dump()))
-        except Exception:
-            pass
+        except Exception as cache_write_error:
+            logger.warning("interaction_cache_write_failed", error=str(cache_write_error))
 
     return response_data

@@ -78,7 +78,8 @@ async def ai_query(
     )
 
     # Store updated conversation history in Redis (last 10 turns, TTL 1 hour)
-    if redis:
+    # Skip off-topic rejections — they add no value to conversation context
+    if redis and result.query_intent != "off_topic":
         try:
             conversation_history.append({"role": "user", "content": body.query})
             conversation_history.append({"role": "assistant", "content": result.response_text})

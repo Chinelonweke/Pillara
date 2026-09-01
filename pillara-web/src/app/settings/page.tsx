@@ -151,8 +151,8 @@ export default function SettingsPage() {
 
   if (authLoading || loadingProfile) {
     return (
-      <div className="min-h-screen bg-[#0F1B2D] flex items-center justify-center">
-        <p className="text-slate-400 text-sm">Loading your profile…</p>
+      <div className="min-h-screen bg-[var(--background)] flex items-center justify-center">
+        <p className="text-[var(--muted)] text-sm">Loading your profile…</p>
       </div>
     )
   }
@@ -160,20 +160,20 @@ export default function SettingsPage() {
   if (!user) return null
 
   return (
-    <div className="min-h-screen bg-[#0F1B2D]">
+    <div className="min-h-screen bg-[var(--background)]">
       {/* Nav */}
-      <nav className="border-b border-white/10 px-8 py-4">
+      <nav className="border-b border-[var(--border)] px-8 py-4">
         <div className="max-w-2xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <Link href="/dashboard" className="text-slate-400 hover:text-white transition-colors text-sm">
+            <Link href="/dashboard" className="text-[var(--muted)] hover:text-[var(--foreground)] transition-colors text-sm">
               ← Dashboard
             </Link>
-            <span className="text-white/20">/</span>
-            <span className="text-white text-sm font-medium">Profile settings</span>
+            <span className="text-[var(--foreground)]/20">/</span>
+            <span className="text-[var(--foreground)] text-sm font-medium">Profile settings</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 bg-[#4A9B8E] rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold text-xs">P</span>
+            <div className="w-7 h-7 bg-[var(--primary)] rounded-lg flex items-center justify-center">
+              <span className="text-[var(--foreground)] font-bold text-xs">P</span>
             </div>
           </div>
         </div>
@@ -181,8 +181,8 @@ export default function SettingsPage() {
 
       <main className="max-w-2xl mx-auto px-8 py-10">
         <div className="mb-8">
-          <h1 className="text-2xl font-bold text-white mb-2">Profile settings</h1>
-          <p className="text-slate-400 text-sm">
+          <h1 className="text-2xl font-bold text-[var(--foreground)] mb-2">Profile settings</h1>
+          <p className="text-[var(--muted)] text-sm">
             Keep your health information up to date for accurate safety checks.
             Changes take effect immediately on your next medication check.
           </p>
@@ -195,19 +195,19 @@ export default function SettingsPage() {
         )}
 
         {saved && (
-          <div className="bg-[#4A9B8E]/10 border border-[#4A9B8E]/30 rounded-lg px-4 py-3 mb-6">
-            <p className="text-[#4A9B8E] text-sm">✓ Profile saved. Redirecting to dashboard…</p>
+          <div className="bg-[var(--primary)]/10 border border-[var(--primary)]/30 rounded-lg px-4 py-3 mb-6">
+            <p className="text-[var(--primary)] text-sm">✓ Profile saved. Redirecting to dashboard…</p>
           </div>
         )}
 
         <form onSubmit={handleSubmit} className="space-y-8">
           {/* Personal info */}
-          <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
-            <h2 className="text-white font-semibold mb-5">Personal information</h2>
+          <div className="bg-white border border-[var(--border)] rounded-2xl p-6">
+            <h2 className="text-[var(--foreground)] font-semibold mb-5">Personal information</h2>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">
-                  Full name <span className="text-[#4A9B8E]">*</span>
+                <label className="block text-sm font-medium text-[var(--foreground)] mb-2">
+                  Full name <span className="text-[var(--primary)]">*</span>
                 </label>
                 <input
                   type="text"
@@ -215,24 +215,24 @@ export default function SettingsPage() {
                   onChange={(e) => setName(e.target.value)}
                   placeholder="e.g. Chinelo Nweke"
                   required
-                  className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-[#4A9B8E] focus:ring-1 focus:ring-[#4A9B8E] transition-colors text-sm"
+                  className="w-full bg-white border border-[var(--border)] rounded-lg px-4 py-3 text-[var(--foreground)] placeholder-slate-500 focus:outline-none focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)] transition-colors text-sm"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-2">
+                  <label className="block text-sm font-medium text-[var(--foreground)] mb-2">
                     Date of birth
                   </label>
                   <input
                     type="date"
                     value={dateOfBirth}
                     onChange={(e) => setDateOfBirth(e.target.value)}
-                    className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-[#4A9B8E] focus:ring-1 focus:ring-[#4A9B8E] transition-colors text-sm [color-scheme:dark]"
+                    className="w-full bg-white border border-[var(--border)] rounded-lg px-4 py-3 text-[var(--foreground)] focus:outline-none focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)] transition-colors text-sm [color-scheme:dark]"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-2">
+                  <label className="block text-sm font-medium text-[var(--foreground)] mb-2">
                     Weight (kg)
                   </label>
                   <input
@@ -242,13 +242,13 @@ export default function SettingsPage() {
                     placeholder="e.g. 70"
                     min="1"
                     max="500"
-                    className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-[#4A9B8E] focus:ring-1 focus:ring-[#4A9B8E] transition-colors text-sm"
+                    className="w-full bg-white border border-[var(--border)] rounded-lg px-4 py-3 text-[var(--foreground)] placeholder-slate-500 focus:outline-none focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)] transition-colors text-sm"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">Gender</label>
+                <label className="block text-sm font-medium text-[var(--foreground)] mb-2">Gender</label>
                 <div className="grid grid-cols-3 gap-2">
                   {['Male', 'Female', 'Other'].map((g) => (
                     <button
@@ -257,8 +257,8 @@ export default function SettingsPage() {
                       onClick={() => setGender(g === gender ? '' : g)}
                       className={`py-2.5 rounded-lg text-sm font-medium transition-colors border ${
                         gender === g
-                          ? 'bg-[#4A9B8E] border-[#4A9B8E] text-white'
-                          : 'bg-white/5 border-white/10 text-slate-300 hover:border-[#4A9B8E]/50'
+                          ? 'bg-[var(--primary)] border-[var(--primary)] text-[var(--foreground)]'
+                          : 'bg-white border-[var(--border)] text-[var(--foreground)] hover:border-[var(--primary)]/50'
                       }`}
                     >
                       {g}
@@ -270,16 +270,16 @@ export default function SettingsPage() {
           </div>
 
           {/* Allergies */}
-          <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
+          <div className="bg-white border border-[var(--border)] rounded-2xl p-6">
             <div className="flex items-start justify-between mb-1">
-              <h2 className="text-white font-semibold">Known drug allergies</h2>
+              <h2 className="text-[var(--foreground)] font-semibold">Known drug allergies</h2>
               {selectedAllergies.length > 0 && (
                 <span className="text-[#F59E0B] text-xs bg-[#F59E0B]/10 border border-[#F59E0B]/20 rounded-full px-2 py-0.5">
                   {selectedAllergies.length} selected
                 </span>
               )}
             </div>
-            <p className="text-slate-500 text-xs mb-4">
+            <p className="text-[var(--muted)] text-xs mb-4">
               Pillara uses this to flag cross-reactive drugs automatically.
               Update this immediately if you discover a new allergy.
             </p>
@@ -293,7 +293,7 @@ export default function SettingsPage() {
                   className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors border ${
                     selectedAllergies.includes(allergy)
                       ? 'bg-[#F59E0B] border-[#F59E0B] text-[#0F1B2D]'
-                      : 'bg-white/5 border-white/10 text-slate-300 hover:border-[#F59E0B]/50'
+                      : 'bg-white border-[var(--border)] text-[var(--foreground)] hover:border-[#F59E0B]/50'
                   }`}
                 >
                   {selectedAllergies.includes(allergy) ? '✓ ' : ''}{allergy}
@@ -323,12 +323,12 @@ export default function SettingsPage() {
                 onChange={(e) => setCustomAllergy(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addCustomAllergy())}
                 placeholder="Add another allergy…"
-                className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-[#F59E0B] focus:ring-1 focus:ring-[#F59E0B] transition-colors text-sm"
+                className="flex-1 bg-white border border-[var(--border)] rounded-lg px-3 py-2 text-[var(--foreground)] placeholder-slate-500 focus:outline-none focus:border-[#F59E0B] focus:ring-1 focus:ring-[#F59E0B] transition-colors text-sm"
               />
               <button
                 type="button"
                 onClick={addCustomAllergy}
-                className="px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-slate-300 hover:text-white transition-colors text-sm"
+                className="px-4 py-2 bg-white border border-[var(--border)] rounded-lg text-[var(--foreground)] hover:text-[var(--foreground)] transition-colors text-sm"
               >
                 Add
               </button>
@@ -336,16 +336,16 @@ export default function SettingsPage() {
           </div>
 
           {/* Medical conditions */}
-          <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
+          <div className="bg-white border border-[var(--border)] rounded-2xl p-6">
             <div className="flex items-start justify-between mb-1">
-              <h2 className="text-white font-semibold">Medical conditions</h2>
+              <h2 className="text-[var(--foreground)] font-semibold">Medical conditions</h2>
               {selectedConditions.length > 0 && (
-                <span className="text-[#4A9B8E] text-xs bg-[#4A9B8E]/10 border border-[#4A9B8E]/20 rounded-full px-2 py-0.5">
+                <span className="text-[var(--primary)] text-xs bg-[var(--primary)]/10 border border-[var(--primary)]/20 rounded-full px-2 py-0.5">
                   {selectedConditions.length} selected
                 </span>
               )}
             </div>
-            <p className="text-slate-500 text-xs mb-4">
+            <p className="text-[var(--muted)] text-xs mb-4">
               Existing diagnoses that affect which medications are safe for you.
               These are separate from allergies — they describe your health
               conditions, not substances you react to.
@@ -359,8 +359,8 @@ export default function SettingsPage() {
                   onClick={() => toggleCondition(condition)}
                   className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors border ${
                     selectedConditions.includes(condition)
-                      ? 'bg-[#4A9B8E] border-[#4A9B8E] text-white'
-                      : 'bg-white/5 border-white/10 text-slate-300 hover:border-[#4A9B8E]/50'
+                      ? 'bg-[var(--primary)] border-[var(--primary)] text-[var(--foreground)]'
+                      : 'bg-white border-[var(--border)] text-[var(--foreground)] hover:border-[var(--primary)]/50'
                   }`}
                 >
                   {selectedConditions.includes(condition) ? '✓ ' : ''}{condition}
@@ -373,7 +373,7 @@ export default function SettingsPage() {
                 {selectedConditions.filter(c => !COMMON_CONDITIONS.includes(c)).map(c => (
                   <span
                     key={c}
-                    className="px-3 py-1.5 rounded-full text-xs font-medium bg-[#4A9B8E] border border-[#4A9B8E] text-white flex items-center gap-1"
+                    className="px-3 py-1.5 rounded-full text-xs font-medium bg-[var(--primary)] border border-[var(--primary)] text-[var(--foreground)] flex items-center gap-1"
                   >
                     ✓ {c}
                     <button type="button" onClick={() => toggleCondition(c)} className="ml-1 opacity-70 hover:opacity-100">×</button>
@@ -389,12 +389,12 @@ export default function SettingsPage() {
                 onChange={(e) => setCustomCondition(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addCustomCondition())}
                 placeholder="Add another condition…"
-                className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-[#4A9B8E] focus:ring-1 focus:ring-[#4A9B8E] transition-colors text-sm"
+                className="flex-1 bg-white border border-[var(--border)] rounded-lg px-3 py-2 text-[var(--foreground)] placeholder-slate-500 focus:outline-none focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)] transition-colors text-sm"
               />
               <button
                 type="button"
                 onClick={addCustomCondition}
-                className="px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-slate-300 hover:text-white transition-colors text-sm"
+                className="px-4 py-2 bg-white border border-[var(--border)] rounded-lg text-[var(--foreground)] hover:text-[var(--foreground)] transition-colors text-sm"
               >
                 Add
               </button>
@@ -405,14 +405,14 @@ export default function SettingsPage() {
           <div className="flex gap-3">
             <Link
               href="/dashboard"
-              className="flex-1 text-center bg-white/5 border border-white/10 hover:bg-white/10 text-slate-300 py-3 rounded-lg font-medium transition-colors text-sm"
+              className="flex-1 text-center bg-white border border-[var(--border)] hover:bg-[var(--primary-light)] text-[var(--foreground)] py-3 rounded-lg font-medium transition-colors text-sm"
             >
               Cancel
             </Link>
             <button
               type="submit"
               disabled={saving}
-              className="flex-1 bg-[#4A9B8E] hover:bg-[#3d8a7d] disabled:opacity-50 disabled:cursor-not-allowed text-white py-3 rounded-lg font-semibold transition-colors text-sm"
+              className="flex-1 bg-[var(--primary)] hover:bg-[#3d8a7d] disabled:opacity-50 disabled:cursor-not-allowed text-[var(--foreground)] py-3 rounded-lg font-semibold transition-colors text-sm"
             >
               {saving ? 'Saving…' : 'Save changes'}
             </button>

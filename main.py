@@ -120,6 +120,36 @@ async def pillara_error_handler(request: Request, error: PillaraError) -> JSONRe
 
 
 @app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, error: Exception) -> JSONResponse:
+    """
+    Catch-all handler for any unhandled exception.
+    Logs at CRITICAL level so it appears in Sentry and structured logs.
+    Returns a clear error response instead of closing the connection silently.
+
+    WHY THIS MATTERS:
+    Without this, unhandled exceptions cause the server to close the connection
+    with no response body — the client sees ERR_EMPTY_RESPONSE and has no idea
+    what went wrong. This handler ensures every failure is visible.
+    """
+    import traceback
+    logger.critical(
+        "unhandled_exception",
+        error=str(error),
+        error_type=type(error).__name__,
+        path=str(request.url.path),
+        method=request.method,
+        traceback=traceback.format_exc(),
+    )
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "internal_error",
+            "message": "An unexpected error occurred. Our team has been notified.",
+        },
+    )
+
+
+@app.exception_handler(Exception)
 async def generic_error_handler(request: Request, error: Exception) -> JSONResponse:
     logger.error(
         "unhandled_exception",

@@ -148,24 +148,24 @@ function RemindersContent() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0F1B2D]">
-      <nav className="border-b border-white/10 px-8 py-4">
+    <div className="min-h-screen bg-[var(--background)]">
+      <nav className="border-b border-[var(--border)] px-8 py-4">
         <div className="max-w-3xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <Link href="/dashboard" className="text-slate-400 hover:text-white text-sm transition-colors">
+            <Link href="/dashboard" className="text-[var(--muted)] hover:text-[var(--foreground)] text-sm transition-colors">
               ← Dashboard
             </Link>
             <span className="text-slate-600">|</span>
             <div className="flex items-center gap-2">
-              <div className="w-6 h-6 bg-[#4A9B8E] rounded-md flex items-center justify-center">
-                <span className="text-white font-bold text-xs">P</span>
+              <div className="w-6 h-6 bg-[var(--primary)] rounded-md flex items-center justify-center">
+                <span className="text-[var(--foreground)] font-bold text-xs">P</span>
               </div>
-              <span className="text-white font-medium text-sm">Reminders</span>
+              <span className="text-[var(--foreground)] font-medium text-sm">Reminders</span>
             </div>
           </div>
           <button
             onClick={() => setShowAddForm(true)}
-            className="bg-[#4A9B8E] hover:bg-[#3d8a7d] text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+            className="bg-[var(--primary)] hover:bg-[#3d8a7d] text-[var(--foreground)] px-4 py-2 rounded-lg text-sm font-medium transition-colors"
           >
             + Add reminder
           </button>
@@ -174,17 +174,17 @@ function RemindersContent() {
 
       <main className="max-w-3xl mx-auto px-8 py-10">
         <div className="mb-8">
-          <h1 className="text-2xl font-bold text-white">Medication Reminders</h1>
-          <p className="text-slate-400 text-sm mt-1">
+          <h1 className="text-2xl font-bold text-[var(--foreground)]">Medication Reminders</h1>
+          <p className="text-[var(--muted)] text-sm mt-1">
             Get email reminders to take your medications on time.
           </p>
         </div>
 
         {showAddForm && (
-          <div className="bg-white/5 border border-white/10 rounded-2xl p-6 mb-8">
+          <div className="bg-white border border-[var(--border)] rounded-2xl p-6 mb-8">
             <div className="flex items-center justify-between mb-5">
-              <h2 className="text-white font-semibold">New reminder</h2>
-              <button onClick={() => setShowAddForm(false)} className="text-slate-400 hover:text-white text-lg">✕</button>
+              <h2 className="text-[var(--foreground)] font-semibold">New reminder</h2>
+              <button onClick={() => setShowAddForm(false)} className="text-[var(--muted)] hover:text-[var(--foreground)] text-lg">✕</button>
             </div>
 
             {addError && (
@@ -195,15 +195,15 @@ function RemindersContent() {
 
             <form onSubmit={handleAdd} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">Medication</label>
+                <label className="block text-sm font-medium text-[var(--foreground)] mb-2">Medication</label>
                 {medications.length === 0 ? (
-                  <p className="text-slate-500 text-sm">No medications added yet. Add medications from the dashboard first.</p>
+                  <p className="text-[var(--muted)] text-sm">No medications added yet. Add medications from the dashboard first.</p>
                 ) : (
                   <select
                     value={selectedMedId}
                     onChange={e => setSelectedMedId(e.target.value)}
                     required
-                    className="w-full bg-[#1a2d47] border border-white/10 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-[#4A9B8E] text-sm"
+                    className="w-full bg-[var(--surface)] border border-[var(--border)] rounded-lg px-4 py-2.5 text-[var(--foreground)] focus:outline-none focus:border-[var(--primary)] text-sm"
                   >
                     <option value="">Select a medication...</option>
                     {medications.map(med => (
@@ -216,26 +216,26 @@ function RemindersContent() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">Time</label>
+                <label className="block text-sm font-medium text-[var(--foreground)] mb-2">Time</label>
                 <input
                   type="time"
                   value={reminderTime}
                   onChange={e => setReminderTime(e.target.value)}
                   required
-                  className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-[#4A9B8E] text-sm"
+                  className="w-full bg-white border border-[var(--border)] rounded-lg px-4 py-2.5 text-[var(--foreground)] focus:outline-none focus:border-[var(--primary)] text-sm"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">Frequency</label>
+                <label className="block text-sm font-medium text-[var(--foreground)] mb-2">Frequency</label>
                 <div className="flex gap-3">
                   <button
                     type="button"
                     onClick={() => { setIsRecurring(true); setFrequency('FREQ=DAILY') }}
                     className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors ${
                       isRecurring && frequency === 'FREQ=DAILY'
-                        ? 'bg-[#4A9B8E] text-white'
-                        : 'bg-white/5 border border-white/10 text-slate-300 hover:border-[#4A9B8E]/50'
+                        ? 'bg-[var(--primary)] text-[var(--foreground)]'
+                        : 'bg-white border border-[var(--border)] text-[var(--foreground)] hover:border-[var(--primary)]/50'
                     }`}
                   >
                     Daily
@@ -245,8 +245,8 @@ function RemindersContent() {
                     onClick={() => { setIsRecurring(true); setFrequency('FREQ=WEEKLY') }}
                     className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors ${
                       isRecurring && frequency === 'FREQ=WEEKLY'
-                        ? 'bg-[#4A9B8E] text-white'
-                        : 'bg-white/5 border border-white/10 text-slate-300 hover:border-[#4A9B8E]/50'
+                        ? 'bg-[var(--primary)] text-[var(--foreground)]'
+                        : 'bg-white border border-[var(--border)] text-[var(--foreground)] hover:border-[var(--primary)]/50'
                     }`}
                   >
                     Weekly
@@ -256,8 +256,8 @@ function RemindersContent() {
                     onClick={() => setIsRecurring(false)}
                     className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors ${
                       !isRecurring
-                        ? 'bg-[#4A9B8E] text-white'
-                        : 'bg-white/5 border border-white/10 text-slate-300 hover:border-[#4A9B8E]/50'
+                        ? 'bg-[var(--primary)] text-[var(--foreground)]'
+                        : 'bg-white border border-[var(--border)] text-[var(--foreground)] hover:border-[var(--primary)]/50'
                     }`}
                   >
                     Once
@@ -265,15 +265,15 @@ function RemindersContent() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-3 bg-white/5 border border-white/10 rounded-lg px-4 py-3">
+              <div className="flex items-center gap-3 bg-white border border-[var(--border)] rounded-lg px-4 py-3">
                 <input
                   type="checkbox"
                   id="notify_email"
                   checked={notifyEmail}
                   onChange={e => setNotifyEmail(e.target.checked)}
-                  className="w-4 h-4 accent-[#4A9B8E]"
+                  className="w-4 h-4 accent-[var(--primary)]"
                 />
-                <label htmlFor="notify_email" className="text-sm text-slate-300">
+                <label htmlFor="notify_email" className="text-sm text-[var(--foreground)]">
                   Send email reminder to my account email
                 </label>
               </div>
@@ -281,7 +281,7 @@ function RemindersContent() {
               <button
                 type="submit"
                 disabled={adding || medications.length === 0}
-                className="w-full bg-[#4A9B8E] hover:bg-[#3d8a7d] disabled:opacity-50 text-white py-3 rounded-lg text-sm font-medium transition-colors"
+                className="w-full bg-[var(--primary)] hover:bg-[#3d8a7d] disabled:opacity-50 text-[var(--foreground)] py-3 rounded-lg text-sm font-medium transition-colors"
               >
                 {adding ? 'Creating...' : 'Create reminder'}
               </button>
@@ -290,19 +290,19 @@ function RemindersContent() {
         )}
 
         {loading ? (
-          <div className="text-slate-400 text-sm text-center py-12">Loading reminders...</div>
+          <div className="text-[var(--muted)] text-sm text-center py-12">Loading reminders...</div>
         ) : reminders.length === 0 ? (
           <div className="text-center py-16">
-            <div className="w-16 h-16 bg-[#4A9B8E]/10 border border-[#4A9B8E]/20 rounded-full flex items-center justify-center mx-auto mb-4">
-              <span className="text-[#4A9B8E] text-2xl">⏰</span>
+            <div className="w-16 h-16 bg-[var(--primary)]/10 border border-[var(--primary)]/20 rounded-full flex items-center justify-center mx-auto mb-4">
+              <span className="text-[var(--primary)] text-2xl">⏰</span>
             </div>
-            <h3 className="text-white font-medium mb-2">No reminders yet</h3>
-            <p className="text-slate-400 text-sm mb-6">
+            <h3 className="text-[var(--foreground)] font-medium mb-2">No reminders yet</h3>
+            <p className="text-[var(--muted)] text-sm mb-6">
               Set up reminders to get email notifications when it&apos;s time to take your medications.
             </p>
             <button
               onClick={() => setShowAddForm(true)}
-              className="bg-[#4A9B8E] hover:bg-[#3d8a7d] text-white px-6 py-2.5 rounded-lg text-sm font-medium transition-colors"
+              className="bg-[var(--primary)] hover:bg-[#3d8a7d] text-[var(--foreground)] px-6 py-2.5 rounded-lg text-sm font-medium transition-colors"
             >
               Add your first reminder
             </button>
@@ -312,22 +312,22 @@ function RemindersContent() {
             {reminders.map(reminder => (
               <div
                 key={reminder.id}
-                className="bg-white/5 border border-white/10 rounded-xl px-5 py-4 flex items-center justify-between group"
+                className="bg-white border border-[var(--border)] rounded-xl px-5 py-4 flex items-center justify-between group"
               >
                 <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 bg-[#4A9B8E]/10 border border-[#4A9B8E]/20 rounded-full flex items-center justify-center flex-shrink-0">
-                    <span className="text-[#4A9B8E] text-lg">⏰</span>
+                  <div className="w-10 h-10 bg-[var(--primary)]/10 border border-[var(--primary)]/20 rounded-full flex items-center justify-center flex-shrink-0">
+                    <span className="text-[var(--primary)] text-lg">⏰</span>
                   </div>
                   <div>
-                    <p className="text-white font-medium text-sm capitalize">
+                    <p className="text-[var(--foreground)] font-medium text-sm capitalize">
                       {getMedName(reminder.medication_id)}
                     </p>
                     <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-slate-400 text-xs">
+                      <span className="text-[var(--muted)] text-xs">
                         {formatTime(reminder.reminder_time)}
                       </span>
                       <span className="text-slate-600 text-xs">·</span>
-                      <span className="text-slate-400 text-xs">
+                      <span className="text-[var(--muted)] text-xs">
                         {reminder.is_recurring
                           ? reminder.recurrence_rule?.includes('DAILY') ? 'Daily' : 'Weekly'
                           : 'One-time'
@@ -336,7 +336,7 @@ function RemindersContent() {
                       {reminder.next_send_at && (
                         <>
                           <span className="text-slate-600 text-xs">·</span>
-                          <span className="text-[#4A9B8E] text-xs">
+                          <span className="text-[var(--primary)] text-xs">
                             {formatNextSend(reminder.next_send_at)}
                           </span>
                         </>
@@ -344,12 +344,12 @@ function RemindersContent() {
                     </div>
                     <div className="flex items-center gap-2 mt-1">
                       {reminder.notify_email && (
-                        <span className="text-xs bg-white/5 border border-white/10 rounded-full px-2 py-0.5 text-slate-400">
+                        <span className="text-xs bg-white border border-[var(--border)] rounded-full px-2 py-0.5 text-[var(--muted)]">
                           📧 Email
                         </span>
                       )}
                       {reminder.notify_push && (
-                        <span className="text-xs bg-white/5 border border-white/10 rounded-full px-2 py-0.5 text-slate-400">
+                        <span className="text-xs bg-white border border-[var(--border)] rounded-full px-2 py-0.5 text-[var(--muted)]">
                           🔔 Push
                         </span>
                       )}
@@ -358,7 +358,7 @@ function RemindersContent() {
                 </div>
                 <button
                   onClick={() => handleDelete(reminder.id)}
-                  className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-red-400 text-xs transition-all"
+                  className="opacity-0 group-hover:opacity-100 text-[var(--muted)] hover:text-red-400 text-xs transition-all"
                 >
                   Delete
                 </button>
@@ -374,8 +374,8 @@ function RemindersContent() {
 export default function RemindersPage() {
   return (
     <Suspense fallback={
-      <div className="min-h-screen bg-[#0F1B2D] flex items-center justify-center">
-        <div className="text-white text-sm">Loading...</div>
+      <div className="min-h-screen bg-[var(--background)] flex items-center justify-center">
+        <div className="text-[var(--foreground)] text-sm">Loading...</div>
       </div>
     }>
       <RemindersContent />

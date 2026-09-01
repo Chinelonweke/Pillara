@@ -122,22 +122,22 @@ function SharePanel({
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-2 md:p-4 overflow-y-auto">
-      <div className="bg-[#0F1B2D] border border-white/10 rounded-2xl w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
+      <div className="bg-[var(--background)] border border-[var(--border)] rounded-2xl w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)]">
           <div>
-            <h2 className="text-white font-semibold">Share Profile</h2>
-            <p className="text-slate-400 text-xs mt-0.5">{profileName} · Your role: <span className="text-[#4A9B8E] capitalize">{userRole}</span></p>
+            <h2 className="text-[var(--foreground)] font-semibold">Share Profile</h2>
+            <p className="text-[var(--muted)] text-xs mt-0.5">{profileName} · Your role: <span className="text-[var(--primary)] capitalize">{userRole}</span></p>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors text-xl">✕</button>
+          <button onClick={onClose} className="text-[var(--muted)] hover:text-[var(--foreground)] transition-colors text-xl">✕</button>
         </div>
 
-        <div className="flex border-b border-white/10">
+        <div className="flex border-b border-[var(--border)]">
           {(['members', 'invite', 'claim'] as const).map(t => (
             <button
               key={t}
               onClick={() => setTab(t)}
               className={`flex-1 py-3 text-sm font-medium transition-colors capitalize ${
-                tab === t ? 'text-[#4A9B8E] border-b-2 border-[#4A9B8E]' : 'text-slate-400 hover:text-white'
+                tab === t ? 'text-[var(--primary)] border-b-2 border-[var(--primary)]' : 'text-[var(--muted)] hover:text-[var(--foreground)]'
               }`}
             >
               {t === 'claim' ? 'Send to Patient' : t === 'invite' ? 'Invite Caregiver' : 'Members'}
@@ -149,21 +149,21 @@ function SharePanel({
           {tab === 'members' && (
             <div>
               {loadingMembers ? (
-                <p className="text-slate-400 text-sm text-center py-4">Loading members...</p>
+                <p className="text-[var(--muted)] text-sm text-center py-4">Loading members...</p>
               ) : members.length === 0 ? (
                 <div className="text-center py-8">
-                  <p className="text-slate-400 text-sm">No one has access to this profile yet.</p>
-                  {isOwner && <p className="text-slate-500 text-xs mt-1">Use the tabs above to invite a caregiver or send to a patient.</p>}
+                  <p className="text-[var(--muted)] text-sm">No one has access to this profile yet.</p>
+                  {isOwner && <p className="text-[var(--muted)] text-xs mt-1">Use the tabs above to invite a caregiver or send to a patient.</p>}
                 </div>
               ) : (
                 <div className="space-y-3">
                   {members.map((m, i) => (
-                    <div key={i} className="flex items-center justify-between bg-white/5 border border-white/10 rounded-xl px-4 py-3">
+                    <div key={i} className="flex items-center justify-between bg-white border border-[var(--border)] rounded-xl px-4 py-3">
                       <div>
-                        <p className="text-white text-sm">{m.email || 'Unknown'}</p>
+                        <p className="text-[var(--foreground)] text-sm">{m.email || 'Unknown'}</p>
                         <div className="flex items-center gap-2 mt-0.5">
-                          <span className="text-[#4A9B8E] text-xs capitalize">{m.role}</span>
-                          <span className="text-slate-600 text-xs">·</span>
+                          <span className="text-[var(--primary)] text-xs capitalize">{m.role}</span>
+                          <span className="text-[var(--muted)] text-xs">·</span>
                           <span className={`text-xs capitalize ${m.status === 'active' ? 'text-green-400' : 'text-yellow-400'}`}>
                             {m.status}
                           </span>
@@ -172,7 +172,7 @@ function SharePanel({
                       {isOwner && m.user_id && (
                         <button
                           onClick={() => handleRevoke(m.user_id)}
-                          className="text-slate-500 hover:text-red-400 text-xs transition-colors"
+                          className="text-[var(--muted)] hover:text-red-400 text-xs transition-colors"
                         >
                           Revoke
                         </button>
@@ -187,16 +187,16 @@ function SharePanel({
           {tab === 'invite' && (
             <div>
               {!isOwner ? (
-                <p className="text-slate-400 text-sm text-center py-4">Only the profile owner can invite others.</p>
+                <p className="text-[var(--muted)] text-sm text-center py-4">Only the profile owner can invite others.</p>
               ) : (
                 <>
-                  <p className="text-slate-400 text-sm mb-4 leading-relaxed">
+                  <p className="text-[var(--muted)] text-sm mb-4 leading-relaxed">
                     Invite a caregiver or nurse to access this profile. They&apos;ll receive an email with a link to accept.
                   </p>
 
                   {inviteMsg && (
-                    <div className="bg-[#4A9B8E]/10 border border-[#4A9B8E]/20 rounded-lg px-4 py-3 mb-4">
-                      <p className="text-[#4A9B8E] text-sm">✓ {inviteMsg}</p>
+                    <div className="bg-[var(--primary)]/10 border border-[var(--primary)]/20 rounded-lg px-4 py-3 mb-4">
+                      <p className="text-[var(--primary)] text-sm">✓ {inviteMsg}</p>
                     </div>
                   )}
                   {inviteError && (
@@ -207,22 +207,22 @@ function SharePanel({
 
                   <form onSubmit={handleInvite} className="space-y-4">
                     <div>
-                      <label className="block text-sm font-medium text-slate-300 mb-2">Email address</label>
+                      <label className="block text-sm font-medium text-[var(--foreground)] mb-2">Email address</label>
                       <input
                         type="email"
                         value={inviteEmail}
                         onChange={e => setInviteEmail(e.target.value)}
                         required
                         placeholder="caregiver@example.com"
-                        className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-[#4A9B8E] text-sm"
+                        className="w-full bg-white border border-[var(--border)] rounded-lg px-4 py-2.5 text-[var(--foreground)] placeholder-slate-500 focus:outline-none focus:border-[var(--primary)] text-sm"
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-slate-300 mb-2">Role</label>
+                      <label className="block text-sm font-medium text-[var(--foreground)] mb-2">Role</label>
                       <select
                         value={inviteRole}
                         onChange={e => setInviteRole(e.target.value)}
-                        className="w-full bg-[#1a2d47] border border-white/10 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-[#4A9B8E] text-sm"
+                        className="w-full bg-[var(--surface)] border border-[var(--border)] rounded-lg px-4 py-2.5 text-[var(--foreground)] focus:outline-none focus:border-[var(--primary)] text-sm"
                       >
                         <option value="caregiver">Caregiver — can view and add medications</option>
                         <option value="viewer">Viewer — read only (e.g. nurse)</option>
@@ -231,7 +231,7 @@ function SharePanel({
                     <button
                       type="submit"
                       disabled={inviting}
-                      className="w-full bg-[#4A9B8E] hover:bg-[#3d8a7d] disabled:opacity-50 text-white py-2.5 rounded-lg text-sm font-medium transition-colors"
+                      className="w-full bg-[var(--primary)] hover:bg-[#3d8a7d] disabled:opacity-50 text-[var(--foreground)] py-2.5 rounded-lg text-sm font-medium transition-colors"
                     >
                       {inviting ? 'Sending invite...' : 'Send invite'}
                     </button>
@@ -244,16 +244,16 @@ function SharePanel({
           {tab === 'claim' && (
             <div>
               {!isOwner ? (
-                <p className="text-slate-400 text-sm text-center py-4">Only the profile owner can send claim invites.</p>
+                <p className="text-[var(--muted)] text-sm text-center py-4">Only the profile owner can send claim invites.</p>
               ) : (
                 <>
-                  <p className="text-slate-400 text-sm mb-4 leading-relaxed">
+                  <p className="text-[var(--muted)] text-sm mb-4 leading-relaxed">
                     Email the patient so they can claim ownership of this profile. They can sign up and take full control, or ignore the email and let you continue managing it.
                   </p>
 
                   {claimMsg && (
-                    <div className="bg-[#4A9B8E]/10 border border-[#4A9B8E]/20 rounded-lg px-4 py-3 mb-4">
-                      <p className="text-[#4A9B8E] text-sm">✓ {claimMsg}</p>
+                    <div className="bg-[var(--primary)]/10 border border-[var(--primary)]/20 rounded-lg px-4 py-3 mb-4">
+                      <p className="text-[var(--primary)] text-sm">✓ {claimMsg}</p>
                     </div>
                   )}
                   {claimError && (
@@ -264,20 +264,20 @@ function SharePanel({
 
                   <form onSubmit={handleClaimInvite} className="space-y-4">
                     <div>
-                      <label className="block text-sm font-medium text-slate-300 mb-2">Patient&apos;s email address</label>
+                      <label className="block text-sm font-medium text-[var(--foreground)] mb-2">Patient&apos;s email address</label>
                       <input
                         type="email"
                         value={claimEmail}
                         onChange={e => setClaimEmail(e.target.value)}
                         required
                         placeholder="patient@example.com"
-                        className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-[#4A9B8E] text-sm"
+                        className="w-full bg-white border border-[var(--border)] rounded-lg px-4 py-2.5 text-[var(--foreground)] placeholder-slate-500 focus:outline-none focus:border-[var(--primary)] text-sm"
                       />
                     </div>
                     <button
                       type="submit"
                       disabled={claiming}
-                      className="w-full bg-[#4A9B8E] hover:bg-[#3d8a7d] disabled:opacity-50 text-white py-2.5 rounded-lg text-sm font-medium transition-colors"
+                      className="w-full bg-[var(--primary)] hover:bg-[#3d8a7d] disabled:opacity-50 text-[var(--foreground)] py-2.5 rounded-lg text-sm font-medium transition-colors"
                     >
                       {claiming ? 'Sending...' : 'Send claim invitation'}
                     </button>
@@ -468,8 +468,8 @@ export default function DashboardPage() {
 
   if (authLoading || loadingData) {
     return (
-      <div className="min-h-screen bg-[#0F1B2D] flex items-center justify-center">
-        <div className="text-slate-400 text-sm">Loading your medications...</div>
+      <div className="min-h-screen bg-[var(--background)] flex items-center justify-center">
+        <div className="text-[var(--muted)] text-sm">Loading your medications...</div>
       </div>
     )
   }
@@ -483,11 +483,11 @@ export default function DashboardPage() {
     moderate: 'text-[#F59E0B] bg-[#F59E0B]/10 border-[#F59E0B]/20',
     low: 'text-green-400 bg-green-500/10 border-green-500/20',
     none: 'text-green-400 bg-green-500/10 border-green-500/20',
-    unknown: 'text-slate-400 bg-slate-500/10 border-slate-500/20',
+    unknown: 'text-[var(--muted)] bg-slate-500/10 border-slate-500/20',
   }
 
   return (
-    <div className="min-h-screen bg-[#0F1B2D]">
+    <div className="min-h-screen" style={{background: "var(--background)"}}>
       {showSharePanel && profile && (
         <SharePanel
           profileId={profile.id}
@@ -497,58 +497,58 @@ export default function DashboardPage() {
         />
       )}
 
-      <nav className="border-b border-white/10 px-4 md:px-8 py-4">
+      <nav className="border-b border-[var(--border)] px-4 md:px-8 py-4" style={{background: "var(--surface)"}}>
         <div className="max-w-5xl mx-auto flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 bg-[#4A9B8E] rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold text-xs">P</span>
+            <div className="w-7 h-7 bg-[var(--primary)] rounded-lg flex items-center justify-center">
+              <span className="text-[var(--foreground)] font-bold text-xs">P</span>
             </div>
-            <span className="text-white font-semibold">Pillara</span>
+            <span className="text-[var(--foreground)] font-semibold">Pillara</span>
 
             {allProfiles.length > 0 && (
               <div className="relative ml-4">
                 <button
                   onClick={() => setShowProfileSwitcher(!showProfileSwitcher)}
-                  className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white hover:bg-white/10 transition-colors"
+                  className="flex items-center gap-2 bg-white border border-[var(--border)] rounded-lg px-3 py-1.5 text-sm text-[var(--foreground)] hover:bg-[var(--primary-light)] transition-colors"
                 >
-                  <span className="text-[#4A9B8E]">👤</span>
+                  <span className="text-[var(--primary)]">👤</span>
                   <span className="max-w-[120px] truncate">{profile?.name || 'Select profile'}</span>
-                  <span className="text-slate-400 text-xs">▾</span>
+                  <span className="text-[var(--muted)] text-xs">▾</span>
                 </button>
 
                 {showProfileSwitcher && (
-                  <div className="absolute top-full left-0 mt-2 w-64 bg-[#1a2d47] border border-white/10 rounded-xl shadow-xl z-50 overflow-hidden">
-                    <div className="px-3 py-2 border-b border-white/10">
-                      <p className="text-xs text-slate-400 font-medium uppercase tracking-wide">Switch Profile</p>
+                  <div className="absolute top-full left-0 mt-2 w-64 bg-[var(--surface)] border border-[var(--border)] rounded-xl shadow-xl z-50 overflow-hidden">
+                    <div className="px-3 py-2 border-b border-[var(--border)]">
+                      <p className="text-xs text-[var(--muted)] font-medium uppercase tracking-wide">Switch Profile</p>
                     </div>
                     {allProfiles.map((p: ProfileWithRole) => (
                       <button
                         key={p.id}
                         onClick={() => switchProfile(p.id)}
-                        className={`w-full flex items-center justify-between px-3 py-2.5 hover:bg-white/5 transition-colors ${
-                          profile?.id === p.id ? 'bg-[#4A9B8E]/10' : ''
+                        className={`w-full flex items-center justify-between px-3 py-2.5 hover:bg-white transition-colors ${
+                          profile?.id === p.id ? 'bg-[var(--primary)]/10' : ''
                         }`}
                       >
                         <div className="flex items-center gap-2 text-left">
                           <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${
-                            p.is_shared_with_me ? 'bg-purple-500/20 text-purple-400' : 'bg-[#4A9B8E]/20 text-[#4A9B8E]'
+                            p.is_shared_with_me ? 'bg-purple-500/20 text-purple-400' : 'bg-[var(--primary)]/20 text-[var(--primary)]'
                           }`}>
                             {p.name.charAt(0).toUpperCase()}
                           </div>
                           <div>
-                            <p className="text-white text-sm font-medium">{p.name}</p>
-                            <p className="text-slate-500 text-xs capitalize">
+                            <p className="text-[var(--foreground)] text-sm font-medium">{p.name}</p>
+                            <p className="text-[var(--muted)] text-xs capitalize">
                               {p.is_shared_with_me ? `Shared · ${p.role}` : p.role}
                             </p>
                           </div>
                         </div>
-                        {profile?.id === p.id && <span className="text-[#4A9B8E] text-xs">✓</span>}
+                        {profile?.id === p.id && <span className="text-[var(--primary)] text-xs">✓</span>}
                       </button>
                     ))}
-                    <div className="border-t border-white/10 px-3 py-2">
+                    <div className="border-t border-[var(--border)] px-3 py-2">
                       <Link
                         href="/onboarding"
-                        className="flex items-center gap-2 text-slate-400 hover:text-white text-sm transition-colors"
+                        className="flex items-center gap-2 text-[var(--muted)] hover:text-[var(--foreground)] text-sm transition-colors"
                         onClick={() => setShowProfileSwitcher(false)}
                       >
                         <span>+</span>
@@ -582,15 +582,15 @@ export default function DashboardPage() {
             {profile && (
               <Link
                 href={`/reminders?profile_id=${profile.id}`}
-                className="hidden sm:block text-slate-400 hover:text-white text-sm transition-colors"
+                className="hidden sm:block text-[var(--muted)] hover:text-[var(--foreground)] text-sm transition-colors"
               >
                 Reminders
               </Link>
             )}
-            <Link href="/settings" className="hidden sm:block text-slate-400 hover:text-white text-sm transition-colors">
+            <Link href="/settings" className="hidden sm:block text-[var(--muted)] hover:text-[var(--foreground)] text-sm transition-colors">
               Settings
             </Link>
-            <button onClick={handleLogout} className="text-slate-400 hover:text-white text-sm transition-colors">
+            <button onClick={handleLogout} className="text-[var(--muted)] hover:text-[var(--foreground)] text-sm transition-colors">
               Sign out
             </button>
           </div>
@@ -600,7 +600,7 @@ export default function DashboardPage() {
       <main className="max-w-5xl mx-auto px-4 md:px-8 py-6 md:py-10">
         <div className="mb-10 flex items-start justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-white mb-1">{profile?.name || 'My Medications'}</h1>
+            <h1 className="text-2xl font-bold text-[var(--foreground)] mb-1">{profile?.name || 'My Medications'}</h1>
             {profile?.known_allergies && (
               <div className="flex items-center gap-2 mt-3">
                 <span className="text-xs text-[#F59E0B] bg-[#F59E0B]/10 border border-[#F59E0B]/20 rounded-full px-3 py-1">
@@ -610,7 +610,7 @@ export default function DashboardPage() {
             )}
             {profile?.medical_conditions && (
               <div className="flex items-center gap-2 mt-2">
-                <span className="text-xs text-slate-400 bg-white/5 border border-white/10 rounded-full px-3 py-1">
+                <span className="text-xs text-[var(--muted)] bg-white border border-[var(--border)] rounded-full px-3 py-1">
                   Condition: {profile.medical_conditions}
                 </span>
               </div>
@@ -620,11 +620,11 @@ export default function DashboardPage() {
           {profile && (
             <button
               onClick={() => setShowSharePanel(true)}
-              className="flex items-center gap-2 bg-white/5 border border-white/10 hover:border-[#4A9B8E]/50 rounded-lg px-4 py-2 text-sm text-slate-300 hover:text-white transition-colors"
+              className="flex items-center gap-2 bg-white border border-[var(--border)] hover:border-[var(--primary)]/50 rounded-lg px-4 py-2 text-sm text-[var(--foreground)] hover:text-[var(--foreground)] transition-colors"
             >
               <span>🔗</span>
               <span>Share</span>
-              <span className="text-xs text-[#4A9B8E] capitalize ml-1">({currentProfileRole})</span>
+              <span className="text-xs text-[var(--primary)] capitalize ml-1">({currentProfileRole})</span>
             </button>
           )}
         </div>
@@ -632,31 +632,31 @@ export default function DashboardPage() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           <div>
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-white font-semibold">Current medications</h2>
-              <span className="text-slate-400 text-xs">{meds.length} total</span>
+              <h2 className="text-[var(--foreground)] font-semibold">Current medications</h2>
+              <span className="text-[var(--muted)] text-xs">{meds.length} total</span>
             </div>
 
             <div className="space-y-3 mb-6">
               {meds.length === 0 ? (
-                <div className="bg-white/5 border border-white/10 border-dashed rounded-xl p-8 text-center">
-                  <p className="text-slate-400 text-sm">No medications added yet.</p>
-                  <p className="text-slate-500 text-xs mt-1">Add your first medication below.</p>
+                <div className="bg-white border border-[var(--border)] border-dashed rounded-xl p-8 text-center">
+                  <p className="text-[var(--muted)] text-sm">No medications added yet.</p>
+                  <p className="text-[var(--muted)] text-xs mt-1">Add your first medication below.</p>
                 </div>
               ) : (
                 meds.map(med => (
                   <div
                     key={med.id}
-                    className="bg-white/5 border border-white/10 rounded-xl px-4 py-3 flex items-center justify-between group"
+                    className="bg-white border border-[var(--border)] rounded-xl px-4 py-3 flex items-center justify-between group"
                   >
                     <div>
-                      <p className="text-white text-sm font-medium capitalize">{med.name}</p>
-                      {med.dosage && <p className="text-slate-400 text-xs mt-0.5">{med.dosage}</p>}
+                      <p className="text-[var(--foreground)] text-sm font-medium capitalize">{med.name}</p>
+                      {med.dosage && <p className="text-[var(--muted)] text-xs mt-0.5">{med.dosage}</p>}
                     </div>
                     <div className="flex items-center gap-3">
-                      <div className="w-2 h-2 bg-[#4A9B8E] rounded-full" />
+                      <div className="w-2 h-2 bg-[var(--primary)] rounded-full" />
                       <button
                         onClick={() => handleDeleteMedication(med.id)}
-                        className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-red-400 transition-all text-xs"
+                        className="opacity-0 group-hover:opacity-100 text-[var(--muted)] hover:text-red-400 transition-all text-xs"
                         title="Remove medication"
                       >
                         ✕
@@ -667,8 +667,8 @@ export default function DashboardPage() {
               )}
             </div>
 
-            <div className="bg-white/5 border border-white/10 rounded-xl p-5">
-              <h3 className="text-white text-sm font-medium mb-4">Add medication</h3>
+            <div className="bg-white border border-[var(--border)] rounded-xl p-5">
+              <h3 className="text-[var(--foreground)] text-sm font-medium mb-4">Add medication</h3>
               {addMedError && (
                 <div className="bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2 mb-4">
                   <p className="text-red-400 text-xs">{addMedError}</p>
@@ -681,19 +681,19 @@ export default function DashboardPage() {
                   onChange={(e) => setNewMedName(e.target.value)}
                   placeholder="Medication name (e.g. amoxicillin)"
                   required
-                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-[#4A9B8E] focus:ring-1 focus:ring-[#4A9B8E] transition-colors text-sm"
+                  className="w-full bg-white border border-[var(--border)] rounded-lg px-3 py-2.5 text-[var(--foreground)] placeholder-slate-500 focus:outline-none focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)] transition-colors text-sm"
                 />
                 <input
                   type="text"
                   value={newMedDosage}
                   onChange={(e) => setNewMedDosage(e.target.value)}
                   placeholder="Dosage (optional, e.g. 500mg)"
-                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-[#4A9B8E] focus:ring-1 focus:ring-[#4A9B8E] transition-colors text-sm"
+                  className="w-full bg-white border border-[var(--border)] rounded-lg px-3 py-2.5 text-[var(--foreground)] placeholder-slate-500 focus:outline-none focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)] transition-colors text-sm"
                 />
                 <button
                   type="submit"
                   disabled={addingMed || !newMedName.trim()}
-                  className="w-full bg-[#4A9B8E] hover:bg-[#3d8a7d] disabled:opacity-50 disabled:cursor-not-allowed text-white py-2.5 rounded-lg text-sm font-medium transition-colors"
+                  className="w-full bg-[var(--primary)] hover:bg-[#3d8a7d] disabled:opacity-50 disabled:cursor-not-allowed text-[var(--foreground)] py-2.5 rounded-lg text-sm font-medium transition-colors"
                 >
                   {addingMed ? 'Adding...' : 'Add medication'}
                 </button>
@@ -703,22 +703,22 @@ export default function DashboardPage() {
 
           <div>
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-white font-semibold">Safety check</h2>
+              <h2 className="text-[var(--foreground)] font-semibold">Safety check</h2>
             </div>
 
-            <div className="bg-white/5 border border-white/10 rounded-xl p-5 mb-4">
-              <p className="text-slate-400 text-sm mb-4 leading-relaxed">
+            <div className="bg-white border border-[var(--border)] rounded-xl p-5 mb-4">
+              <p className="text-[var(--muted)] text-sm mb-4 leading-relaxed">
                 Check all your current medications for dangerous interactions and allergy cross-reactivity.
               </p>
               <button
                 onClick={handleInteractionCheck}
                 disabled={checking || meds.length === 0}
-                className="w-full bg-[#4A9B8E] hover:bg-[#3d8a7d] disabled:opacity-50 disabled:cursor-not-allowed text-white py-3 rounded-lg text-sm font-semibold transition-colors"
+                className="w-full bg-[var(--primary)] hover:bg-[#3d8a7d] disabled:opacity-50 disabled:cursor-not-allowed text-[var(--foreground)] py-3 rounded-lg text-sm font-semibold transition-colors"
               >
                 {checking ? 'Checking...' : `Check ${meds.length} medication${meds.length !== 1 ? 's' : ''}`}
               </button>
               {meds.length === 0 && (
-                <p className="text-slate-500 text-xs mt-2 text-center">Add at least one medication first.</p>
+                <p className="text-[var(--muted)] text-xs mt-2 text-center">Add at least one medication first.</p>
               )}
             </div>
 
@@ -745,24 +745,24 @@ export default function DashboardPage() {
                     </div>
                     {checkResult.allergy_warnings.map((warning, i) => (
                       <div key={i} className="mb-3 last:mb-0">
-                        <p className="text-white text-sm font-medium capitalize mb-1">{warning.drug_name} — {warning.allergen} allergy</p>
-                        <p className="text-slate-300 text-xs leading-relaxed mb-2">{warning.description}</p>
+                        <p className="text-[var(--foreground)] text-sm font-medium capitalize mb-1">{warning.drug_name} — {warning.allergen} allergy</p>
+                        <p className="text-[var(--foreground)] text-xs leading-relaxed mb-2">{warning.description}</p>
                         <p className="text-[#F59E0B] text-xs font-medium">{warning.action_required}</p>
                       </div>
                     ))}
                   </div>
                 )}
 
-                <div className="bg-white/5 border border-white/10 rounded-xl p-4">
-                  <p className="text-slate-300 text-xs font-medium mb-3 uppercase tracking-wide">Analysis</p>
-                  <p className="text-slate-300 text-sm leading-7">{stripMarkdown(checkResult.summary)}</p>
+                <div className="bg-white border border-[var(--border)] rounded-xl p-4">
+                  <p className="text-[var(--foreground)] text-xs font-medium mb-3 uppercase tracking-wide">Analysis</p>
+                  <p className="text-[var(--foreground)] text-sm leading-7">{stripMarkdown(checkResult.summary)}</p>
                 </div>
 
-                <p className="text-slate-500 text-xs leading-relaxed px-1">{checkResult.disclaimer}</p>
+                <p className="text-[var(--muted)] text-xs leading-relaxed px-1">{checkResult.disclaimer}</p>
 
                 <div className="flex items-center gap-2 px-1">
-                  <div className={`w-2 h-2 rounded-full ${checkResult.confidence_gate_passed ? 'bg-[#4A9B8E]' : 'bg-slate-500'}`} />
-                  <p className="text-slate-500 text-xs">
+                  <div className={`w-2 h-2 rounded-full ${checkResult.confidence_gate_passed ? 'bg-[var(--primary)]' : 'bg-slate-500'}`} />
+                  <p className="text-[var(--muted)] text-xs">
                     {checkResult.confidence_gate_passed
                       ? 'Response grounded in verified clinical data'
                       : 'Insufficient verified data — consult your pharmacist'}
@@ -774,31 +774,31 @@ export default function DashboardPage() {
         </div>
 
         <div className="mt-10">
-          <div className="bg-[#1a2d47] border border-[#4A9B8E]/20 rounded-xl px-4 py-3 mb-4 flex items-start gap-3">
-            <span className="text-[#4A9B8E] text-sm mt-0.5 flex-shrink-0">ℹ️</span>
-            <p className="text-slate-400 text-xs leading-relaxed">
-              <strong className="text-slate-300">Informational use only.</strong>{' '}
+          <div className="bg-[var(--surface)] border border-[var(--primary)]/20 rounded-xl px-4 py-3 mb-4 flex items-start gap-3">
+            <span className="text-[var(--primary)] text-sm mt-0.5 flex-shrink-0">ℹ️</span>
+            <p className="text-[var(--muted)] text-xs leading-relaxed">
+              <strong className="text-[var(--foreground)]">Informational use only.</strong>{' '}
               Pillara provides medication information and is not a substitute for professional medical advice.
               Always consult your doctor or pharmacist before making any medication decisions.{' '}
-              <a href="/privacy" className="text-[#4A9B8E] hover:underline">Privacy Policy</a>
+              <a href="/privacy" className="text-[var(--primary)] hover:underline">Privacy Policy</a>
             </p>
           </div>
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h2 className="text-white font-semibold">Ask the medication assistant</h2>
-              <p className="text-slate-500 text-xs mt-1">Ask about drug classes, adverse effects, interactions, or how medications work.</p>
+              <h2 className="text-[var(--foreground)] font-semibold">Ask the medication assistant</h2>
+              <p className="text-[var(--muted)] text-xs mt-1">Ask about drug classes, adverse effects, interactions, or how medications work.</p>
             </div>
           </div>
 
-          <div className="bg-white/5 border border-white/10 rounded-xl overflow-hidden">
+          <div className="rounded-xl overflow-hidden" style={{background: "var(--surface)", border: "1px solid var(--border)", boxShadow: "var(--shadow)"}}>
             <div className="h-64 md:h-80 overflow-y-auto p-4 space-y-4" id="chat-messages">
               {chatMessages.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-center px-4 md:px-8">
-                  <div className="w-12 h-12 bg-[#4A9B8E]/10 border border-[#4A9B8E]/20 rounded-full flex items-center justify-center mb-4">
-                    <span className="text-[#4A9B8E] text-xl">💊</span>
+                  <div className="w-12 h-12 bg-[var(--primary)]/10 border border-[var(--primary)]/20 rounded-full flex items-center justify-center mb-4">
+                    <span className="text-[var(--primary)] text-xl">💊</span>
                   </div>
-                  <p className="text-slate-300 text-sm font-medium mb-2">Ask anything about medications</p>
-                  <p className="text-slate-500 text-xs leading-relaxed max-w-sm">
+                  <p className="text-[var(--foreground)] text-sm font-medium mb-2">Ask anything about medications</p>
+                  <p className="text-[var(--muted)] text-xs leading-relaxed max-w-sm">
                     Try: &quot;What drug class is amoxicillin?&quot; or &quot;What are the side effects of ibuprofen?&quot;
                   </p>
                   <div className="flex flex-wrap gap-2 mt-4 justify-center">
@@ -806,7 +806,7 @@ export default function DashboardPage() {
                       <button
                         key={suggestion}
                         onClick={() => setChatInput(suggestion)}
-                        className="px-3 py-1.5 bg-white/5 border border-white/10 rounded-full text-slate-400 text-xs hover:text-white hover:border-white/30 transition-colors"
+                        className="px-3 py-1.5 bg-white border border-[var(--border)] rounded-full text-[var(--muted)] text-xs hover:text-[var(--foreground)] hover:border-white/30 transition-colors"
                       >
                         {suggestion}
                       </button>
@@ -817,36 +817,36 @@ export default function DashboardPage() {
                 chatMessages.map((msg, i) => (
                   <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                     {msg.role === 'assistant' && (
-                      <div className="w-7 h-7 bg-[#4A9B8E] rounded-full flex items-center justify-center mr-2 mt-0.5 flex-shrink-0">
-                        <span className="text-white text-xs font-bold">P</span>
+                      <div className="w-7 h-7 bg-[var(--primary)] rounded-full flex items-center justify-center mr-2 mt-0.5 flex-shrink-0">
+                        <span className="text-[var(--foreground)] text-xs font-bold">P</span>
                       </div>
                     )}
                     <div className="flex flex-col gap-1">
                       <div className={`max-w-[75%] rounded-2xl px-4 py-3 ${
                         msg.role === 'user'
-                          ? 'bg-[#4A9B8E] text-white rounded-tr-sm'
-                          : 'bg-white/8 border border-white/10 text-slate-300 rounded-tl-sm'
+                          ? 'bg-[var(--primary)] text-[var(--foreground)] rounded-tr-sm'
+                          : 'bg-white border border-[var(--border)] text-[var(--foreground)] rounded-tl-sm'
                       }`}>
                         <p className="text-sm leading-relaxed">{stripMarkdown(msg.content)}</p>
                       </div>
                       {msg.role === 'assistant' && (
                         <div className="flex items-center gap-2 ml-1">
                           {feedbackGiven[i] ? (
-                            <span className="text-xs text-slate-500">
+                            <span className="text-xs text-[var(--muted)]">
                               {feedbackGiven[i] === 'helpful' ? '👍 Thanks!' : '👎 Noted'}
                             </span>
                           ) : (
                             <>
                               <button
                                 onClick={() => handleFeedback(i, 'helpful')}
-                                className="text-slate-500 hover:text-green-400 text-xs transition-colors"
+                                className="text-[var(--muted)] hover:text-green-400 text-xs transition-colors"
                                 title="Helpful"
                               >
                                 👍
                               </button>
                               <button
                                 onClick={() => handleFeedback(i, 'unhelpful')}
-                                className="text-slate-500 hover:text-red-400 text-xs transition-colors"
+                                className="text-[var(--muted)] hover:text-red-400 text-xs transition-colors"
                                 title="Not helpful"
                               >
                                 👎
@@ -861,10 +861,10 @@ export default function DashboardPage() {
               )}
               {chatLoading && (
                 <div className="flex justify-start">
-                  <div className="w-7 h-7 bg-[#4A9B8E] rounded-full flex items-center justify-center mr-2 flex-shrink-0">
-                    <span className="text-white text-xs font-bold">P</span>
+                  <div className="w-7 h-7 bg-[var(--primary)] rounded-full flex items-center justify-center mr-2 flex-shrink-0">
+                    <span className="text-[var(--foreground)] text-xs font-bold">P</span>
                   </div>
-                  <div className="bg-white/8 border border-white/10 rounded-2xl rounded-tl-sm px-4 py-3">
+                  <div className="bg-white border border-[var(--border)] rounded-2xl rounded-tl-sm px-4 py-3">
                     <div className="flex gap-1">
                       <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{animationDelay: '0ms'}} />
                       <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{animationDelay: '150ms'}} />
@@ -875,7 +875,7 @@ export default function DashboardPage() {
               )}
             </div>
 
-            <div className="border-t border-white/10 p-4">
+            <div className="border-t border-[var(--border)] p-4">
               {chatError && <p className="text-red-400 text-xs mb-3">{chatError}</p>}
               <div className="flex gap-3">
                 <input
@@ -885,17 +885,17 @@ export default function DashboardPage() {
                   onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleChatSend()}
                   placeholder="Ask about a drug, class, or interaction..."
                   disabled={chatLoading}
-                  className="flex-1 bg-white/5 border border-white/10 rounded-lg px-4 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-[#4A9B8E] focus:ring-1 focus:ring-[#4A9B8E] transition-colors text-sm disabled:opacity-50"
+                  className="flex-1 bg-white border border-[var(--border)] rounded-lg px-4 py-2.5 text-[var(--foreground)] placeholder-slate-500 focus:outline-none focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)] transition-colors text-sm disabled:opacity-50"
                 />
                 <button
                   onClick={handleChatSend}
                   disabled={chatLoading || !chatInput.trim()}
-                  className="bg-[#4A9B8E] hover:bg-[#3d8a7d] disabled:opacity-50 disabled:cursor-not-allowed text-white px-5 py-2.5 rounded-lg text-sm font-medium transition-colors"
+                  className="bg-[var(--primary)] hover:bg-[#3d8a7d] disabled:opacity-50 disabled:cursor-not-allowed text-[var(--foreground)] px-5 py-2.5 rounded-lg text-sm font-medium transition-colors"
                 >
                   Send
                 </button>
               </div>
-              <p className="text-slate-600 text-xs mt-2">
+              <p className="text-[var(--muted)] text-xs mt-2">
                 Responses are grounded in verified clinical data. Always confirm with your pharmacist.
               </p>
             </div>

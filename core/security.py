@@ -239,6 +239,22 @@ def strip_llm_output_html(text: str) -> str:
     if not text:
         return ""
 
+    # Fix mojibake encoding — FDA/LLM text sometimes has double-encoded UTF-8
+    try:
+        text = text.encode('latin-1').decode('utf-8')
+    except (UnicodeDecodeError, UnicodeEncodeError):
+        pass
+    # Replace problematic Unicode characters with clean ASCII
+    text = (text
+        .replace('—', ' - ').replace('–', '-')
+        .replace('’', "'").replace('‘', "'")
+        .replace('“', '"').replace('”', '"')
+        .replace('®', '').replace(' ', ' ')
+        .replace('•', '-').replace('±', '+/-')
+        .replace('·', '-').replace('…', '...')
+        .replace('â¯', ' ').replace('¯', '')
+    )
+
     # Remove script tags and their content entirely (not just the tag)
     text = re.sub(r'<script[^>]*>.*?</script>', '', text, flags=re.IGNORECASE | re.DOTALL)
 

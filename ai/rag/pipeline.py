@@ -281,126 +281,111 @@ async def classify_medication_intent(
     groq_api_key: str,
 ) -> bool:
     """
-    Three-stage medication intent classifier.
+    Two-stage medication intent classifier. No hardcoded drug lists.
+    No LLM Stage 3 — fail open if Stage 1 and Stage 2 both miss.
 
-    Stage 1 — Fast-path (zero cost, zero latency):
-    Check for obvious medical terms. Catches "what is this medication",
-    "drug interactions", "side effects" etc. without any API call.
+    Stage 1 — Fast-path medical terms (zero cost):
+    Checks for obvious pharmaceutical/medical terms including drug classes
+    (beta-blockers, NSAIDs, statins, etc), symptoms, and medical concepts.
+    Covers the vast majority of legitimate medication questions.
 
-    Stage 2 — RxNorm lookup (cached, ~200ms first call, ~1ms cached):
-    Extract words from the query and check each against RxNorm API.
-    If any word resolves to a known drug (rxcui found), query is medical.
-    This correctly handles "What is acetaminophen?", "Is ibuprofen safe?",
-    "Tell me about metformin" — any query containing a real drug name.
-    Results cached in Redis for 24 hours.
+    Stage 2 — RxNorm word lookup (cached, ~200ms first call):
+    Checks each word against RxNorm API. If any word is a known drug
+    (rxcui found), query is medication-related. Handles specific drug names
+    that aren't in the fast-path list.
 
-    Stage 3 — LLM classifier (only for genuinely ambiguous queries):
-    Uses allam-2-7b (7B params, fast, free on Groq).
-    Only fires when Stage 1 and Stage 2 both find nothing.
-    Handles queries like "how do I make a bag?" or "what is the weather?"
-    On failure, defaults to True (fail open — better than blocking real queries).
-
-    WHY RXNORM AS STAGE 2:
-    RxNorm is the authoritative drug terminology system. It knows every
-    generic name, brand name, synonym, and international name for every
-    drug. If RxNorm recognizes a word as a drug, the query is medication-related.
-    No hardcoded lists. No maintenance. Handles any drug name automatically.
+    Fail open: if neither stage finds a match, allow through.
+    A false positive (off-topic query reaching RAG) wastes one LLM call.
+    A false negative (medication question blocked) breaks the product.
+    The confidence gate and RAG pipeline handle off-topic gracefully anyway.
     """
-    import httpx
-
     query_lower = query.lower()
 
-    # ── STAGE 1: Fast-path medical terms ──────────────────────────────────
+    # ── STAGE 1: Fast-path — pharmaceutical terms + drug classes ──────────
+    # Includes specific drug classes so "beta-blockers", "NSAIDs",
+    # "statins", "opioids" etc are always allowed through.
     FAST_PATH_TERMS = {
+        # General pharmaceutical terms
         "drug", "drugs", "medication", "medications", "medicine", "medicines",
         "pill", "pills", "tablet", "tablets", "capsule", "capsules",
-        "dose", "dosage", "dosing", "prescription",
-        "pharmacist", "pharmacy", "pharmaceutical",
-        "side effect", "side effects", "adverse effect",
-        "drug interaction", "contraindication",
-        "antibiotic", "antibiotics", "antiviral", "antifungal",
+        "dose", "dosage", "dosing", "prescription", "prescribe",
+        "pharmacist", "pharmacy", "pharmaceutical", "pharmaceuticals",
+        "side effect", "side effects", "adverse", "adverse effect",
+        "drug interaction", "interaction", "contraindication",
         "overdose", "toxicity", "over the counter", "otc",
-        "allergy", "allergic", "allergen", "interaction",
+        "allergy", "allergic", "allergen",
+        "antibiotic", "antibiotics", "antiviral", "antifungal",
+        "painkiller", "analgesic",
+        "inject", "injection", "infusion", "inhaler",
+        "generic", "brand name", "active ingredient",
+
+        # Drug classes — so "beta-blockers work" is always allowed
+        "beta-blocker", "beta blocker", "beta blockers",
+        "nsaid", "nsaids", "anti-inflammatory",
+        "statin", "statins",
+        "ace inhibitor", "ace inhibitors",
+        "calcium channel blocker", "calcium channel blockers",
+        "anticoagulant", "anticoagulants", "blood thinner", "blood thinners",
+        "antidepressant", "antidepressants",
+        "antipsychotic", "antipsychotics",
+        "benzodiazepine", "benzodiazepines",
+        "opioid", "opioids", "opiate", "opiates",
+        "steroid", "steroids", "corticosteroid", "corticosteroids",
+        "antihistamine", "antihistamines",
+        "diuretic", "diuretics",
+        "antihypertensive", "antihypertensives",
+        "antidiabetic", "antidiabetics",
+        "antifungal", "antifungals",
+        "antiviral", "antivirals",
+        "immunosuppressant", "immunosuppressants",
+        "proton pump inhibitor", "ppi",
+        "bronchodilator", "bronchodilators",
+        "vasodilator", "vasodilators",
+        "antimalarial", "antimalarials",
+        "vaccine", "vaccines", "vaccination",
+
+        # Medical/clinical terms
+        "clinical", "therapeutic", "pharmacology", "pharmacokinetics",
+        "half-life", "bioavailability", "mechanism of action",
+        "contraindicated", "indicated", "indication",
+        "treatment", "therapy", "regimen",
+        "symptom", "symptoms", "condition", "disease",
+        "blood pressure", "hypertension", "diabetes", "infection",
+        "pain", "fever", "inflammation", "swelling",
+        "doctor", "physician", "pharmacist", "clinical",
+        "safe", "safety", "warning", "caution", "risk",
+        "explain", "what is", "how does", "how do", "when to",
+        "used for", "prescribed for", "treats", "treats",
     }
+
     if any(term in query_lower for term in FAST_PATH_TERMS):
         return True
 
-    # ── STAGE 2: RxNorm drug name lookup ──────────────────────────────────
-    # Extract individual words and check each against RxNorm
-    # This catches any real drug name regardless of whether we've seen it before
+    # ── STAGE 2: RxNorm — check each word as a potential drug name ────────
     import re
-    words = re.findall(r'[a-zA-Z]{4,}', query)  # words 4+ chars (filters noise)
+    import httpx
+    words = re.findall(r'[a-zA-Z]{4,}', query)
 
     for word in words:
-        cache_key = f"rxnorm:classify:{word.lower()}"
         try:
-            # Check Redis cache first
-            if hasattr(classify_medication_intent, '_redis') and classify_medication_intent._redis:
-                cached = await classify_medication_intent._redis.get(cache_key)
-                if cached is not None:
-                    if cached.decode() == "1":
-                        return True
-                    continue  # cached as not-a-drug, skip API call
-
-            # Call RxNorm API
             async with httpx.AsyncClient(timeout=3.0) as client:
                 r = await client.get(
                     "https://rxnav.nlm.nih.gov/REST/rxcui.json",
                     params={"name": word, "search": 1}
                 )
-                data = r.json()
-                rxcui_list = data.get("idGroup", {}).get("rxnormId", [])
-                is_drug = len(rxcui_list) > 0
-
-                # Cache result for 24 hours
-                if hasattr(classify_medication_intent, '_redis') and classify_medication_intent._redis:
-                    try:
-                        await classify_medication_intent._redis.setex(
-                            cache_key, 86400, "1" if is_drug else "0"
-                        )
-                    except Exception:
-                        pass
-
-                if is_drug:
+                rxcui_list = r.json().get("idGroup", {}).get("rxnormId", [])
+                if rxcui_list:
                     return True
-
         except Exception:
-            pass  # RxNorm unavailable — continue to next word
+            continue
 
-    # ── STAGE 3: LLM classifier for genuinely ambiguous queries ───────────
-    # Only fires when no medical terms AND no drug names found
-    # Uses allam-2-7b: smaller than gpt-oss-20b, sufficient for yes/no
-    prompt = (
-        f"Question: {query}\n\n"
-        "Is this question about a medication, drug, or pharmaceutical topic? "
-        "Answer YES or NO only."
-    )
-
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            response = await client.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {groq_api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": "allam-2-7b",
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 3,
-                    "temperature": 0.0,
-                },
-            )
-            data = response.json()
-            answer = data["choices"][0]["message"]["content"].strip().upper()
-            return answer.startswith("YES")
-
-    except Exception as error:
-        import logging
-        logging.getLogger(__name__).warning(
-            "intent_classifier_failed", error=str(error)
-        )
-        return True  # Fail open
+    # ── FAIL OPEN ─────────────────────────────────────────────────────────
+    # Neither stage found medication-related content.
+    # Return False only — the RAG pipeline's confidence gate will handle
+    # truly off-topic queries gracefully with the low-confidence fallback.
+    # We only block queries we are CERTAIN are off-topic (handled by the
+    # pipeline checking is_obviously_medical first before calling us).
+    return False
 
 
 # ─── RAG PIPELINE ─────────────────────────────────────────────────────────────
@@ -530,11 +515,11 @@ class RAGPipeline:
             logger.info("rag_off_topic_rejected", query_preview=user_query[:50])
             return RAGResult(
                 response_text=(
-                    "Pillara is a medication safety assistant. I can only help with "
+                    "I don't have information on that topic. "
+                    "Pillara is a medication safety assistant — I can only help with "
                     "questions about medications, drug interactions, side effects, dosage, "
                     "allergies, and pharmaceutical safety. "
-                    "Your question doesn't appear to be about medications. "
-                    "If you have a medication question, please try again."
+                    "Please ask a medication-related question."
                 ),
                 disclaimer="",
                 retrieved_chunks=[],
@@ -731,13 +716,26 @@ class RAGPipeline:
         """
         pipeline_start = time.monotonic()
 
-        # ── Off-topic guard ───────────────────────────────────────────────
+        # ── Off-topic guard (streaming path) ────────────────────────────────
         understanding = QueryUnderstanding(user_query)
-        if understanding.is_off_topic():
+        is_medical = understanding.is_obviously_medical()
+        if not is_medical:
+            try:
+                classify_medication_intent._redis = self.redis
+                is_medical = await classify_medication_intent(
+                    query=user_query,
+                    groq_api_key=settings.GROQ_API_KEY,
+                )
+            except Exception:
+                is_medical = True  # fail open
+
+        if not is_medical:
             yield {"type": "chunk", "text": (
-                "I can only help with medication-related questions — "
-                "drug interactions, side effects, dosage, and medication safety. "
-                "For other topics, please consult appropriate resources."
+                "I don't have information on that topic. "
+                "I am Pillara's medication assistant and I can only help with "
+                "questions about medications, drug interactions, side effects, "
+                "dosage, allergies, and pharmaceutical safety. "
+                "Please ask a medication-related question."
             )}
             yield {"type": "meta", "confidence_gate_passed": False,
                    "provider_used": "none", "query_intent": "off_topic",
@@ -1310,20 +1308,21 @@ Relevance Score: {chunk.final_score:.3f}
         drugs_str = ", ".join(drugs_mentioned) if drugs_mentioned else "the medications you mentioned"
 
         if drugs_str == "the medications you mentioned":
-            # No drug names detected — likely an off-topic or unclear query
+            # Passed classifier but no drug names found — general pharmaceutical query
+            # with insufficient data in our knowledge base
             fallback_text = (
-                "Pillara is a medication safety assistant. I can only help with questions "
-                "about drugs, medications, drug interactions, side effects, dosage, and "
-                "pharmaceutical safety. Your question doesn't appear to be about medications. "
-                "If you have a medication question, please try rephrasing it with the drug name."
+                "I don't have enough verified information to answer that question confidently. "
+                "If you are asking about a specific medication, please include the drug name. "
+                "Your pharmacist or doctor can provide accurate guidance on this topic."
             )
         else:
+            # Specific drug found but not enough data in ChromaDB
             fallback_text = (
-                f"I wasn't able to find enough verified clinical information about {drugs_str} "
-                f"to answer confidently. "
-                f"For accurate medication information, please speak with your pharmacist or "
-                f"doctor directly. You can also check the FDA drug database at "
-                f"https://www.accessdata.fda.gov/scripts/cder/daf/ for verified drug details."
+                f"I don't have enough verified clinical information about {drugs_str} "
+                f"to answer that question confidently. "
+                f"Please speak with your pharmacist or doctor for accurate guidance. "
+                f"You can also check the FDA drug database at "
+                f"https://www.accessdata.fda.gov/scripts/cder/daf/ for verified details."
             )
 
         latency = (time.monotonic() - pipeline_start) * 1000

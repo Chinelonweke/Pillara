@@ -2,19 +2,19 @@ import Link from 'next/link'
 
 export default function AboutPage() {
   return (
-    <div className="min-h-screen bg-[#0F1B2D] text-white">
+    <div className="min-h-screen text-[var(--foreground)]" style={{background: "var(--background)"}}>
       {/* Nav */}
-      <nav className="border-b border-white/10 px-6 md:px-12 py-4">
+      <nav className="border-b border-[var(--border)] px-6 md:px-12 py-4">
         <div className="max-w-6xl mx-auto flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-[#4A9B8E] rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold text-sm">P</span>
+            <div className="w-8 h-8 bg-[var(--primary)] rounded-lg flex items-center justify-center">
+              <span className="text-[var(--foreground)] font-bold text-sm">P</span>
             </div>
-            <span className="text-white font-semibold text-lg">Pillara</span>
+            <span className="text-[var(--foreground)] font-semibold text-lg">Pillara</span>
           </Link>
           <div className="flex items-center gap-4">
-            <Link href="/login" className="text-slate-400 hover:text-white text-sm transition-colors">Sign in</Link>
-            <Link href="/register" className="bg-[#4A9B8E] hover:bg-[#3d8a7d] text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+            <Link href="/login" className="text-[var(--muted)] hover:text-[var(--foreground)] text-sm transition-colors">Sign in</Link>
+            <Link href="/register" className="bg-[var(--primary)] hover:bg-[#3d8a7d] text-[var(--foreground)] px-4 py-2 rounded-lg text-sm font-medium transition-colors">
               Get started
             </Link>
           </div>
@@ -22,14 +22,14 @@ export default function AboutPage() {
       </nav>
 
       <main className="px-6 md:px-12 py-16 max-w-3xl mx-auto">
-        <h1 className="text-4xl font-bold text-white mb-4">About Pillara</h1>
-        <p className="text-slate-400 text-lg leading-relaxed mb-12">
+        <h1 className="text-4xl font-bold text-[var(--foreground)] mb-4">About Pillara</h1>
+        <p className="text-[var(--muted)] text-lg leading-relaxed mb-12">
           Medication errors kill. Most are preventable with better information.
         </p>
 
-        <div className="space-y-12 text-slate-300 text-sm leading-7">
+        <div className="space-y-12 text-[var(--foreground)] text-sm leading-7">
           <section>
-            <h2 className="text-white font-semibold text-xl mb-4">The problem we&apos;re solving</h2>
+            <h2 className="text-[var(--foreground)] font-semibold text-xl mb-4">The problem we&apos;re solving</h2>
             <p>
               Polypharmacy — taking multiple medications at the same time — is one of the leading causes of
               preventable hospital admissions worldwide. In Nigeria, where pharmacist density is low and
@@ -47,7 +47,7 @@ export default function AboutPage() {
           </section>
 
           <section>
-            <h2 className="text-white font-semibold text-xl mb-4">How we built it</h2>
+            <h2 className="text-[var(--foreground)] font-semibold text-xl mb-4">How we built it</h2>
             <p>
               Pillara uses a retrieval-augmented generation (RAG) pipeline — the same architecture
               used by enterprise medical AI systems. Every answer is grounded in verified data from
@@ -66,7 +66,7 @@ export default function AboutPage() {
           </section>
 
           <section>
-            <h2 className="text-white font-semibold text-xl mb-4">Our commitment to privacy</h2>
+            <h2 className="text-[var(--foreground)] font-semibold text-xl mb-4">Our commitment to privacy</h2>
             <p>
               Your medication list is among the most sensitive data you have. We treat it that way.
             </p>
@@ -80,7 +80,7 @@ export default function AboutPage() {
           </section>
 
           <section>
-            <h2 className="text-white font-semibold text-xl mb-4">What Pillara is not</h2>
+            <h2 className="text-[var(--foreground)] font-semibold text-xl mb-4">What Pillara is not</h2>
             <div className="bg-[#F59E0B]/5 border border-[#F59E0B]/20 rounded-xl p-4">
               <p>
                 Pillara is an informational tool. It does not replace your doctor, pharmacist, or any
@@ -92,18 +92,18 @@ export default function AboutPage() {
           </section>
 
           <section>
-            <h2 className="text-white font-semibold text-xl mb-4">Contact</h2>
+            <h2 className="text-[var(--foreground)] font-semibold text-xl mb-4">Contact</h2>
             <p>Questions, feedback, or partnership inquiries:</p>
-            <a href="mailto:hello@pillara.site" className="text-[#4A9B8E] hover:underline">hello@pillara.site</a>
+            <a href="mailto:hello@pillara.site" className="text-[var(--primary)] hover:underline">hello@pillara.site</a>
             <p className="mt-2">Privacy and data requests:</p>
-            <a href="mailto:privacy@pillara.site" className="text-[#4A9B8E] hover:underline">privacy@pillara.site</a>
+            <a href="mailto:privacy@pillara.site" className="text-[var(--primary)] hover:underline">privacy@pillara.site</a>
           </section>
         </div>
 
-        <div className="mt-16 pt-8 border-t border-white/10 flex gap-6">
-          <Link href="/" className="text-slate-500 hover:text-slate-300 text-sm transition-colors">← Home</Link>
-          <Link href="/privacy" className="text-slate-500 hover:text-slate-300 text-sm transition-colors">Privacy Policy</Link>
-          <Link href="/terms" className="text-slate-500 hover:text-slate-300 text-sm transition-colors">Terms of Service</Link>
+        <div className="mt-16 pt-8 border-t border-[var(--border)] flex gap-6">
+          <Link href="/" className="text-[var(--muted)] hover:text-[var(--foreground)] text-sm transition-colors">← Home</Link>
+          <Link href="/privacy" className="text-[var(--muted)] hover:text-[var(--foreground)] text-sm transition-colors">Privacy Policy</Link>
+          <Link href="/terms" className="text-[var(--muted)] hover:text-[var(--foreground)] text-sm transition-colors">Terms of Service</Link>
         </div>
       </main>
     </div>

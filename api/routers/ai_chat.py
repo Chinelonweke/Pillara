@@ -52,8 +52,8 @@ async def ai_query(
                 request_id=request.state.request_id,
             )
             profile_medication_names = [m.name for m in medications if m.is_active]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("medication_load_for_ai_failed", error=str(e))
 
     # Fetch conversation history — slice at load time to prevent unbounded memory
     conversation_history = []
@@ -64,8 +64,8 @@ async def ai_query(
             history_json = await redis.get(history_key)
             if history_json:
                 conversation_history = json.loads(history_json)[-10:]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("conversation_history_load_failed", error=str(e))
 
     # Run the RAG pipeline
     pipeline = RAGPipeline(redis=redis)
@@ -85,8 +85,8 @@ async def ai_query(
             conversation_history.append({"role": "assistant", "content": result.response_text})
             history_key = f"conversation:{current_user.id}:{conversation_id}"
             await redis.setex(history_key, 3600, json.dumps(conversation_history[-10:]))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("conversation_history_save_failed", error=str(e))
 
     await audit.log(
         event_type=AuditEventType.AI_QUERY_MADE,
@@ -195,8 +195,8 @@ async def voice_query(
                     request_id=request.state.request_id,
                 )
                 profile_medication_names = [m.name for m in medications if m.is_active]
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("tts_fallback_failed", error=str(e))
 
         # Run RAG pipeline with voice formatting
         from ai.rag.pipeline import RAGPipeline
@@ -244,8 +244,8 @@ async def voice_query(
         # Always delete temp audio file — clean up PHI
         try:
             os.unlink(temp_path)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("temp_audio_cleanup_failed", error=str(e))
 
 
 @router.post(

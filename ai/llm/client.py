@@ -95,7 +95,8 @@ class LLMClient:
         try:
             status = await self.redis.get(f"{self._health_key_prefix}{provider_name}")
             return status is None
-        except Exception:
+        except Exception as health_err:
+            import logging; logging.getLogger(__name__).debug("provider_health_check_failed", extra={"error": str(health_err)})
             return True
 
     async def _mark_provider_unhealthy(self, provider_name: str, ttl_seconds: int = None) -> None:
@@ -105,7 +106,7 @@ class LLMClient:
             ttl = ttl_seconds or settings.LLM_PROVIDER_HEALTH_CACHE_TTL
             await self.redis.setex(f"{self._health_key_prefix}{provider_name}", ttl, "unhealthy")
         except Exception:
-            pass
+            import logging; logging.getLogger(__name__).warning("provider_health_mark_failed", extra={"error": "redis unavailable"})
 
     async def _call_gemini_provider(self, provider_config: dict, model: str, messages: list, system_prompt: str) -> str:
         """

@@ -137,8 +137,8 @@ async def check_interactions(
                 cached = await redis.get(cache_key)
                 if cached:
                     cached_text = cached.decode()
-            except Exception:
-                pass
+            except Exception as redis_err:
+                logger.debug("fda_cache_read_failed", error=str(redis_err))
 
         if cached_text:
             fda_interaction_context.append(f"{drug.upper()} (FDA label interactions):\n{cached_text}")
@@ -175,8 +175,8 @@ async def check_interactions(
                 try:
                     # Try to fix mojibake: re-encode as latin-1 then decode as utf-8
                     interactions_text = interactions_text.encode('latin-1').decode('utf-8')
-                except (UnicodeDecodeError, UnicodeEncodeError):
-                    pass
+                except (UnicodeDecodeError, UnicodeEncodeError) as enc_err:
+                    logger.debug("fda_text_encoding_fallback", error=str(enc_err))
                 # Replace special characters with clean ASCII equivalents
                 interactions_text = (
                     interactions_text

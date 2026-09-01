@@ -376,8 +376,8 @@ async def classify_medication_intent(
                 rxcui_list = r.json().get("idGroup", {}).get("rxnormId", [])
                 if rxcui_list:
                     return True
-        except Exception:
-            continue
+        except Exception as rxnorm_word_err:
+            logger.debug("rxnorm_word_check_failed", error=str(rxnorm_word_err))
 
     # ── FAIL OPEN ─────────────────────────────────────────────────────────
     # Neither stage found medication-related content.
@@ -495,8 +495,8 @@ class RAGPipeline:
                                     rxcui=rxcui_list[0],
                                 )
                                 break
-                    except Exception:
-                        continue  # RxNorm unavailable for this word, try next
+                    except Exception as rxnorm_err:
+                        logger.debug("rxnorm_classify_word_failed", error=str(rxnorm_err))
             except Exception as rxnorm_error:
                 logger.warning("rxnorm_classify_failed", error=str(rxnorm_error))
 
@@ -728,7 +728,8 @@ class RAGPipeline:
                     query=user_query,
                     groq_api_key=settings.GROQ_API_KEY,
                 )
-            except Exception:
+            except Exception as classify_err:
+                logger.warning("intent_classifier_failed_fail_open", error=str(classify_err))
                 is_medical = True  # fail open
 
         if not is_medical:

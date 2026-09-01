@@ -40,12 +40,20 @@ class SharingService:
         if profile.user_id == user_id and profile.status == "unclaimed":
             return "owner"
 
-        # Owner (patient who claimed)
+        # Owner (patient who claimed ownership)
         if profile.owner_user_id == user_id:
             return "owner"
 
-        # Creator of active profile where someone else is owner = caregiver
-        if profile.user_id == user_id and profile.status == "active" and profile.owner_user_id != user_id:
+        # Creator of active profile with no owner assigned yet = owner
+        # This happens when a patient creates their own profile directly
+        # (owner_user_id is NULL until a claim flow completes)
+        if profile.user_id == user_id and profile.owner_user_id is None:
+            return "owner"
+
+        # Creator of active profile where someone else has claimed ownership = caregiver
+        # This happens when a nurse/caregiver created the profile and the
+        # patient later claimed it
+        if profile.user_id == user_id and profile.status == "active" and profile.owner_user_id is not None and profile.owner_user_id != user_id:
             return "caregiver"
 
         # Check explicit access grants

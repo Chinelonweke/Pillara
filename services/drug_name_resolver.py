@@ -47,8 +47,8 @@ async def resolve_to_generic(drug_name: str, redis=None) -> str:
                 resolved = cached.decode()
                 logger.debug("rxnorm_cache_hit", drug=drug_name, resolved=resolved)
                 return resolved
-        except Exception:
-            pass  # Cache miss — proceed to API call
+        except Exception as e:
+            logger.debug("rxnorm_cache_read_failed", error=str(e))
 
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
@@ -84,8 +84,8 @@ async def resolve_to_generic(drug_name: str, redis=None) -> str:
             if redis:
                 try:
                     await redis.setex(cache_key, CACHE_TTL, generic_name)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning("rxnorm_cache_write_failed", error=str(e))
 
             return generic_name
 

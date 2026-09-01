@@ -17,14 +17,6 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <script dangerouslySetInnerHTML={{__html: `
-        (function() {
-          try {
-            var dark = localStorage.getItem('pillara_dark_mode') === 'true';
-            document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
-          } catch(e) {}
-        })();
-      `}} />
       <body className={inter.className}>
         <AuthProvider>
           {children}

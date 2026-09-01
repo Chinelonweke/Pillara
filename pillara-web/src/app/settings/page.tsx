@@ -26,6 +26,67 @@ export default function SettingsPage() {
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
 
+  // Account management state
+  const [showChangePassword, setShowChangePassword] = useState(false)
+  const [showDeleteAccount, setShowDeleteAccount] = useState(false)
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmNewPassword, setConfirmNewPassword] = useState('')
+  const [deletePassword, setDeletePassword] = useState('')
+  const [accountActionLoading, setAccountActionLoading] = useState(false)
+  const [accountActionMsg, setAccountActionMsg] = useState('')
+  const [accountActionError, setAccountActionError] = useState('')
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (newPassword !== confirmNewPassword) {
+      setAccountActionError('New passwords do not match.')
+      return
+    }
+    if (newPassword.length < 8) {
+      setAccountActionError('New password must be at least 8 characters.')
+      return
+    }
+    setAccountActionLoading(true)
+    setAccountActionError('')
+    setAccountActionMsg('')
+    try {
+      const token = localStorage.getItem('pillara_access_token')
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/v1/auth/change-password`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setAccountActionError(data.message || 'Failed to change password.'); return }
+      setAccountActionMsg('Password changed successfully.')
+      setCurrentPassword('')
+      setNewPassword('')
+      setConfirmNewPassword('')
+      setShowChangePassword(false)
+    } catch { setAccountActionError('Something went wrong. Please try again.') }
+    finally { setAccountActionLoading(false) }
+  }
+
+  const handleDeleteAccount = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setAccountActionLoading(true)
+    setAccountActionError('')
+    try {
+      const token = localStorage.getItem('pillara_access_token')
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/v1/auth/account`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: deletePassword }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setAccountActionError(data.message || 'Failed to delete account.'); return }
+      localStorage.clear()
+      router.push('/')
+    } catch { setAccountActionError('Something went wrong. Please try again.') }
+    finally { setAccountActionLoading(false) }
+  }
+
   // Dark mode state — initialized directly from localStorage to avoid setState-in-effect lint error
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false
@@ -414,6 +475,100 @@ export default function SettingsPage() {
             </div>
           </div>
 
+          {/* Save */}
+          <div className="flex gap-3">
+            <Link
+              href="/dashboard"
+              className="flex-1 text-center bg-[var(--surface)] border border-[var(--border)] hover:bg-[var(--primary-light)] text-[var(--foreground)] py-3 rounded-lg font-medium transition-colors text-sm"
+            >
+              Cancel
+            </Link>
+            <button
+              type="submit"
+              disabled={saving}
+              className="flex-1 bg-[var(--primary)] hover:bg-[#3d8a7d] disabled:opacity-50 disabled:cursor-not-allowed text-[var(--foreground)] py-3 rounded-lg font-semibold transition-colors text-sm"
+            >
+              {saving ? 'Saving…' : 'Save changes'}
+            </button>
+          </div>
+        </form>
+      </main>
+          {/* Account */}
+          <div className="rounded-xl border border-[var(--border)] overflow-hidden" style={{background: 'var(--surface)'}}>
+            <div className="px-5 py-4 border-b border-[var(--border)]">
+              <h2 className="font-semibold text-sm" style={{color: 'var(--foreground)'}}>Account</h2>
+            </div>
+            <div className="divide-y divide-[var(--border)]">
+              <div className="px-5 py-4">
+                {accountActionMsg && (
+                  <div className="mb-3 p-3 rounded-lg text-sm" style={{background: 'var(--primary-light)', color: 'var(--primary)'}}>✓ {accountActionMsg}</div>
+                )}
+                {accountActionError && (
+                  <div className="mb-3 p-3 rounded-lg text-sm" style={{background: '#FEF2F2', color: '#DC2626'}}>{accountActionError}</div>
+                )}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium" style={{color: 'var(--foreground)'}}>Change password</p>
+                    <p className="text-xs mt-0.5" style={{color: 'var(--muted)'}}>Update your account password</p>
+                  </div>
+                  <button type="button" onClick={() => { setShowChangePassword(!showChangePassword); setAccountActionError(''); setAccountActionMsg('') }}
+                    className="text-sm font-medium" style={{color: 'var(--primary)'}}>
+                    {showChangePassword ? 'Cancel' : 'Change'}
+                  </button>
+                </div>
+                {showChangePassword && (
+                  <form onSubmit={handleChangePassword} className="mt-4 space-y-3">
+                    <input type="password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)}
+                      required placeholder="Current password"
+                      className="w-full px-4 py-2.5 rounded-xl text-sm outline-none"
+                      style={{background: 'var(--background)', border: '1.5px solid var(--border)', color: 'var(--foreground)'}} />
+                    <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)}
+                      required placeholder="New password (min 8 characters)"
+                      className="w-full px-4 py-2.5 rounded-xl text-sm outline-none"
+                      style={{background: 'var(--background)', border: '1.5px solid var(--border)', color: 'var(--foreground)'}} />
+                    <input type="password" value={confirmNewPassword} onChange={e => setConfirmNewPassword(e.target.value)}
+                      required placeholder="Confirm new password"
+                      className="w-full px-4 py-2.5 rounded-xl text-sm outline-none"
+                      style={{background: 'var(--background)', border: '1.5px solid var(--border)', color: 'var(--foreground)'}} />
+                    <button type="submit" disabled={accountActionLoading}
+                      className="w-full py-2.5 rounded-xl text-white text-sm font-semibold"
+                      style={{background: 'var(--primary)'}}>
+                      {accountActionLoading ? 'Changing...' : 'Update password'}
+                    </button>
+                  </form>
+                )}
+              </div>
+              <div className="px-5 py-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium" style={{color: '#DC2626'}}>Delete account</p>
+                    <p className="text-xs mt-0.5" style={{color: 'var(--muted)'}}>Permanently delete your account and all data</p>
+                  </div>
+                  <button type="button" onClick={() => { setShowDeleteAccount(!showDeleteAccount); setAccountActionError('') }}
+                    className="text-sm font-medium" style={{color: '#DC2626'}}>
+                    {showDeleteAccount ? 'Cancel' : 'Delete'}
+                  </button>
+                </div>
+                {showDeleteAccount && (
+                  <form onSubmit={handleDeleteAccount} className="mt-4 space-y-3">
+                    <div className="p-3 rounded-xl text-xs" style={{background: '#FEF2F2', color: '#DC2626'}}>
+                      ⚠️ This is permanent and cannot be undone. All your profiles, medications, reminders, and data will be deleted.
+                    </div>
+                    <input type="password" value={deletePassword} onChange={e => setDeletePassword(e.target.value)}
+                      required placeholder="Enter your password to confirm"
+                      className="w-full px-4 py-2.5 rounded-xl text-sm outline-none"
+                      style={{background: 'var(--background)', border: '1.5px solid #FCA5A5', color: 'var(--foreground)'}} />
+                    <button type="submit" disabled={accountActionLoading}
+                      className="w-full py-2.5 rounded-xl text-white text-sm font-semibold"
+                      style={{background: '#DC2626'}}>
+                      {accountActionLoading ? 'Deleting...' : 'Permanently delete my account'}
+                    </button>
+                  </form>
+                )}
+              </div>
+            </div>
+          </div>
+
           {/* App Preferences */}
           <div className="rounded-xl border border-[var(--border)] overflow-hidden" style={{background: 'var(--surface)'}}>
             <div className="px-5 py-4 border-b border-[var(--border)]">
@@ -440,24 +595,6 @@ export default function SettingsPage() {
             </div>
           </div>
 
-          {/* Save */}
-          <div className="flex gap-3">
-            <Link
-              href="/dashboard"
-              className="flex-1 text-center bg-[var(--surface)] border border-[var(--border)] hover:bg-[var(--primary-light)] text-[var(--foreground)] py-3 rounded-lg font-medium transition-colors text-sm"
-            >
-              Cancel
-            </Link>
-            <button
-              type="submit"
-              disabled={saving}
-              className="flex-1 bg-[var(--primary)] hover:bg-[#3d8a7d] disabled:opacity-50 disabled:cursor-not-allowed text-[var(--foreground)] py-3 rounded-lg font-semibold transition-colors text-sm"
-            >
-              {saving ? 'Saving…' : 'Save changes'}
-            </button>
-          </div>
-        </form>
-      </main>
     </div>
   )
 }

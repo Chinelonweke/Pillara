@@ -26,15 +26,11 @@ export default function SettingsPage() {
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
 
-  // Dark mode state — persisted in localStorage
-  const [darkMode, setDarkMode] = useState(false)
-
-  useEffect(() => {
-    const saved = localStorage.getItem('pillara_dark_mode')
-    const isDark = saved === 'true'
-    setDarkMode(isDark)
-    document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light')
-  }, [])
+  // Dark mode state — initialized directly from localStorage to avoid setState-in-effect lint error
+  const [darkMode, setDarkMode] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false
+    return localStorage.getItem('pillara_dark_mode') === 'true'
+  })
 
   const toggleDarkMode = () => {
     const newValue = !darkMode

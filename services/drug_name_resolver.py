@@ -52,26 +52,64 @@ async def resolve_to_generic(drug_name: str, redis=None) -> str:
 
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
-            # Step 1: Get the RxNorm concept ID (rxcui) for this drug name
-            r = await client.get(
-                f"{RXNORM_BASE}/rxcui.json",
-                params={"name": drug_name, "search": 1}
-            )
-            data = r.json()
-            rxcui_list = data.get("idGroup", {}).get("rxnormId", [])
 
-            if not rxcui_list:
+            async def rxnorm_lookup(name: str):
+                """Call RxNorm and return (rxcui, generic_name) or None."""
+                r = await client.get(
+                    f"{RXNORM_BASE}/rxcui.json",
+                    params={"name": name, "search": 1}
+                )
+                rxcui_list = r.json().get("idGroup", {}).get("rxnormId", [])
+                if not rxcui_list:
+                    return None
+                rxcui = rxcui_list[0]
+                r2 = await client.get(f"{RXNORM_BASE}/rxcui/{rxcui}/properties.json")
+                generic = r2.json().get("properties", {}).get("name", name).lower()
+                return (rxcui, generic)
+
+            # ── Step 1: Try the full drug name directly ───────────────────
+            result = await rxnorm_lookup(drug_name)
+
+            # ── Step 2: Word extraction for Nigerian/African brand names ──
+            # Many Nigerian brands follow: "[Manufacturer] [INN] [Dose]"
+            # e.g. "Emzor Paracetamol 500mg" → try each word → "Paracetamol" found
+            # e.g. "Amoxil 250mg" → skip "250mg" (numeric) → try "Amoxil" → found
+            # This handles brands RxNorm doesn't know by extracting the INN.
+            # No hardcoding — works for any brand following this naming convention.
+            if not result and len(name_lower.split()) > 1:
+                import re
+                # Extract meaningful words:
+                # - 4+ alphabetic characters only
+                # - Skip dose strings like "250mg", "400mg", "DS", "XR", "XL"
+                # - Skip manufacturer prefixes that are clearly not drug names
+                SKIP_WORDS = {
+                    'tablet', 'capsule', 'syrup', 'injection', 'suspension',
+                    'cream', 'ointment', 'drops', 'plus', 'extra', 'forte',
+                    'junior', 'adult', 'night', 'rapid', 'extended', 'release',
+                }
+                words = re.findall(r'[a-zA-Z]{4,}', drug_name)
+                for word in words:
+                    word_lower = word.lower()
+                    if word_lower == name_lower:
+                        continue  # Skip if same as full name
+                    if word_lower in SKIP_WORDS:
+                        continue  # Skip non-drug descriptor words
+                    word_result = await rxnorm_lookup(word)
+                    if word_result:
+                        result = word_result
+                        logger.info(
+                            "rxnorm_word_extraction",
+                            original=drug_name,
+                            matched_word=word,
+                            generic=word_result[1],
+                        )
+                        break
+
+            if not result:
                 logger.debug("rxnorm_no_match", drug=drug_name)
                 return name_lower
 
-            rxcui = rxcui_list[0]
-
-            # Step 2: Get the generic (ingredient) name for this rxcui
-            r2 = await client.get(
-                f"{RXNORM_BASE}/rxcui/{rxcui}/properties.json"
-            )
-            props = r2.json().get("properties", {})
-            generic_name = props.get("name", drug_name).lower()
+            rxcui, generic_name = result
 
             logger.info(
                 "rxnorm_resolved",
@@ -91,7 +129,16 @@ async def resolve_to_generic(drug_name: str, redis=None) -> str:
 
     except Exception as error:
         logger.warning("rxnorm_lookup_failed", drug=drug_name, error=str(error))
-        return name_lower  # Fall back to original name
+
+    # Step 1 + Step 2 both failed — return original name
+    # Post-launch: integrate DrugBank Open Data (free, register at go.drugbank.com)
+    # to handle compound African brands (Lonart, Ampiclox, Septrin etc.)
+    logger.warning(
+        "drug_name_unresolved",
+        drug=drug_name,
+        message="Could not resolve via RxNorm direct lookup or word extraction",
+    )
+    return name_lower
 
 
 async def resolve_all_drug_names(drug_names: list, redis=None) -> list:

@@ -2,19 +2,31 @@
 import { useState } from 'react'
 import Link from 'next/link'
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('')
   const [submitted, setSubmitted] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    // Password reset via email is not yet implemented in the backend.
-    // This page collects the email and shows the user what to do next.
-    // WHY SHOW A MESSAGE INSTEAD OF AN ERROR:
-    // For security, we never confirm whether an email is registered or not.
-    // Showing a consistent "check your email" message regardless means
-    // an attacker can't use this form to enumerate registered emails.
-    setSubmitted(true)
+    setError('')
+    setLoading(true)
+
+    try {
+      await fetch(`${API_BASE}/api/v1/auth/password-reset/request`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      })
+      setSubmitted(true)
+    } catch {
+      setError('Something went wrong. Please try again.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -35,6 +47,12 @@ export default function ForgotPasswordPage() {
                 Enter your email and we&apos;ll send you a link to reset your password.
               </p>
 
+              {error && (
+                <div className="bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-3 mb-6">
+                  <p className="text-red-400 text-sm">{error}</p>
+                </div>
+              )}
+
               <form onSubmit={handleSubmit} className="space-y-5">
                 <div>
                   <label className="block text-sm font-medium text-slate-300 mb-2">
@@ -52,9 +70,10 @@ export default function ForgotPasswordPage() {
 
                 <button
                   type="submit"
-                  className="w-full bg-[#4A9B8E] hover:bg-[#3d8a7d] text-white py-3 rounded-lg font-semibold transition-colors text-sm"
+                  disabled={loading}
+                  className="w-full bg-[#4A9B8E] hover:bg-[#3d8a7d] disabled:opacity-50 disabled:cursor-not-allowed text-white py-3 rounded-lg font-semibold transition-colors text-sm"
                 >
-                  Send reset link
+                  {loading ? 'Sending...' : 'Send reset link'}
                 </button>
               </form>
             </>
@@ -68,9 +87,11 @@ export default function ForgotPasswordPage() {
                 If an account exists for <span className="text-white">{email}</span>,
                 you&apos;ll receive a password reset link shortly.
               </p>
-              <p className="text-slate-500 text-xs text-center mt-4 leading-relaxed">
-                Didn&apos;t receive it? Check your spam folder, or contact
-                support at <span className="text-slate-400">support@pillara.app</span>
+              <p className="text-slate-500 text-xs text-center mt-4">
+                Didn&apos;t receive it? Check your spam folder, or{' '}
+                <button onClick={() => setSubmitted(false)} className="text-[#4A9B8E] hover:underline">
+                  try again
+                </button>
               </p>
             </>
           )}

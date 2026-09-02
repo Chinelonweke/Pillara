@@ -6,7 +6,6 @@
 # 4. Explicit connect_args for SSL enforcement in production
 
 import time
-from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 from sqlalchemy import text

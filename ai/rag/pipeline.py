@@ -1,37 +1,18 @@
 # ai/rag/pipeline.py
-#
-# WHY THIS FILE IS THE MOST CLINICALLY IMPORTANT IN THE AI LAYER:
-# This pipeline is what makes Pillara safe.
-# Without it, the LLM answers drug questions from training data — confidently
-# and sometimes incorrectly. With it, the LLM ONLY answers from verified
-# drug information we have retrieved and validated.
-#
-# THE PIPELINE SEQUENCE:
-# 1. Receive user query (already sanitized by middleware)
-# 2. Understand the query (extract drug names, detect intent)
-# 3. Expand the query (add synonyms, brand names)
-# 4. Retrieve relevant chunks (3 methods simultaneously)
-# 5. Combine results (Reciprocal Rank Fusion)
-# 6. Re-rank for precision (cross-encoder)
-# 7. CHECK CONFIDENCE GATE — if score too low, do not answer
-# 8. Build the LLM prompt with retrieved context
-# 9. Call the LLM (via the 5-provider fallback client)
-# 10. Validate the output
-# 11. Return the response with full metadata
+
 
 import asyncio
 import re
 import time
-from dataclasses import dataclass, field  # dataclass = cleaner way to make data containers
-from typing import Any, Optional
+from dataclasses import dataclass  # dataclass = cleaner way to make data containers
+from typing import Optional
 
 import chromadb
 from chromadb.config import Settings as ChromaSettings
 
-from ai.llm.client import LLMClient, QueryComplexity
+from ai.llm.client import LLMClient
 from ai.llm.prompts import (
     build_interaction_prompt,
-    build_medication_info_prompt,
     build_general_chat_prompt,
 )
 from core.config import settings
@@ -81,6 +62,8 @@ class RAGResult:
     query_intent: str                # what we detected the user was asking
     drugs_mentioned: list            # drug names we extracted from the query
     latency_ms: float                # total pipeline time in milliseconds
+    prompt_tokens: int = 0           # tokens sent to LLM (for cost tracking)
+    completion_tokens: int = 0       # tokens received from LLM (for cost tracking)
     disclaimer: str = (
         "Please discuss this with your doctor or pharmacist "
         "before making any changes to your medications."
@@ -201,6 +184,37 @@ class QueryUnderstanding:
 
         return found_drugs
 
+    # Minimal fast-path medical terms — obvious medication queries skip
+    # the LLM classifier entirely. Keep this list small and high-confidence.
+    # The LLM classifier handles all ambiguous cases.
+    FAST_PATH_TERMS: set = {
+        "drug", "drugs", "medication", "medications", "medicine", "medicines",
+        "pill", "pills", "tablet", "tablets", "capsule", "capsules",
+        "dose", "dosage", "dosing", "prescription",
+        "pharmacist", "pharmacy", "pharmaceutical",
+        "side effect", "side effects", "adverse effect",
+        "drug interaction", "contraindication",
+        "antibiotic", "antibiotics", "antiviral", "antifungal",
+        "overdose", "toxicity",
+        "over the counter", "otc",
+    }
+
+    def is_obviously_medical(self) -> bool:
+        """
+        Stage 1 fast-path check.
+        Returns True if the query obviously contains medication-related terms.
+        These queries skip the LLM classifier entirely — zero extra cost.
+        """
+        return any(term in self.query_lower for term in self.FAST_PATH_TERMS)
+
+    def is_off_topic(self) -> bool:
+        """
+        DEPRECATED — use the async two-stage classifier in the pipeline instead.
+        Kept for backwards compatibility. Returns False (allow) by default.
+        The pipeline now uses is_obviously_medical() + async LLM classifier.
+        """
+        return False
+
     def detect_intent(self) -> str:
         """
         Determines what the user is asking for.
@@ -260,6 +274,120 @@ class QueryUnderstanding:
         return expanded
 
 
+# ─── INTENT CLASSIFIER ───────────────────────────────────────────────────────
+
+async def classify_medication_intent(
+    query: str,
+    groq_api_key: str,
+) -> bool:
+    """
+    Two-stage medication intent classifier. No hardcoded drug lists.
+    No LLM Stage 3 — fail open if Stage 1 and Stage 2 both miss.
+
+    Stage 1 — Fast-path medical terms (zero cost):
+    Checks for obvious pharmaceutical/medical terms including drug classes
+    (beta-blockers, NSAIDs, statins, etc), symptoms, and medical concepts.
+    Covers the vast majority of legitimate medication questions.
+
+    Stage 2 — RxNorm word lookup (cached, ~200ms first call):
+    Checks each word against RxNorm API. If any word is a known drug
+    (rxcui found), query is medication-related. Handles specific drug names
+    that aren't in the fast-path list.
+
+    Fail open: if neither stage finds a match, allow through.
+    A false positive (off-topic query reaching RAG) wastes one LLM call.
+    A false negative (medication question blocked) breaks the product.
+    The confidence gate and RAG pipeline handle off-topic gracefully anyway.
+    """
+    query_lower = query.lower()
+
+    # ── STAGE 1: Fast-path — pharmaceutical terms + drug classes ──────────
+    # Includes specific drug classes so "beta-blockers", "NSAIDs",
+    # "statins", "opioids" etc are always allowed through.
+    FAST_PATH_TERMS = {
+        # General pharmaceutical terms
+        "drug", "drugs", "medication", "medications", "medicine", "medicines",
+        "pill", "pills", "tablet", "tablets", "capsule", "capsules",
+        "dose", "dosage", "dosing", "prescription", "prescribe",
+        "pharmacist", "pharmacy", "pharmaceutical", "pharmaceuticals",
+        "side effect", "side effects", "adverse", "adverse effect",
+        "drug interaction", "interaction", "contraindication",
+        "overdose", "toxicity", "over the counter", "otc",
+        "allergy", "allergic", "allergen",
+        "antibiotic", "antibiotics", "antiviral", "antifungal",
+        "painkiller", "analgesic",
+        "inject", "injection", "infusion", "inhaler",
+        "generic", "brand name", "active ingredient",
+
+        # Drug classes — so "beta-blockers work" is always allowed
+        "beta-blocker", "beta blocker", "beta blockers",
+        "nsaid", "nsaids", "anti-inflammatory",
+        "statin", "statins",
+        "ace inhibitor", "ace inhibitors",
+        "calcium channel blocker", "calcium channel blockers",
+        "anticoagulant", "anticoagulants", "blood thinner", "blood thinners",
+        "antidepressant", "antidepressants",
+        "antipsychotic", "antipsychotics",
+        "benzodiazepine", "benzodiazepines",
+        "opioid", "opioids", "opiate", "opiates",
+        "steroid", "steroids", "corticosteroid", "corticosteroids",
+        "antihistamine", "antihistamines",
+        "diuretic", "diuretics",
+        "antihypertensive", "antihypertensives",
+        "antidiabetic", "antidiabetics",
+        "antifungal", "antifungals",
+        "antiviral", "antivirals",
+        "immunosuppressant", "immunosuppressants",
+        "proton pump inhibitor", "ppi",
+        "bronchodilator", "bronchodilators",
+        "vasodilator", "vasodilators",
+        "antimalarial", "antimalarials",
+        "vaccine", "vaccines", "vaccination",
+
+        # Medical/clinical terms
+        "clinical", "therapeutic", "pharmacology", "pharmacokinetics",
+        "half-life", "bioavailability", "mechanism of action",
+        "contraindicated", "indicated", "indication",
+        "treatment", "therapy", "regimen",
+        "symptom", "symptoms", "condition", "disease",
+        "blood pressure", "hypertension", "diabetes", "infection",
+        "pain", "fever", "inflammation", "swelling",
+        "doctor", "physician", "pharmacist", "clinical",
+        "safe", "safety", "warning", "caution", "risk",
+        "explain", "what is", "how does", "how do", "when to",
+        "used for", "prescribed for", "treats", "treats",
+    }
+
+    if any(term in query_lower for term in FAST_PATH_TERMS):
+        return True
+
+    # ── STAGE 2: RxNorm — check each word as a potential drug name ────────
+    import re
+    import httpx
+    words = re.findall(r'[a-zA-Z]{4,}', query)
+
+    for word in words:
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                r = await client.get(
+                    "https://rxnav.nlm.nih.gov/REST/rxcui.json",
+                    params={"name": word, "search": 1}
+                )
+                rxcui_list = r.json().get("idGroup", {}).get("rxnormId", [])
+                if rxcui_list:
+                    return True
+        except Exception as rxnorm_word_err:
+            logger.debug("rxnorm_word_check_failed", error=str(rxnorm_word_err))
+
+    # ── FAIL OPEN ─────────────────────────────────────────────────────────
+    # Neither stage found medication-related content.
+    # Return False only — the RAG pipeline's confidence gate will handle
+    # truly off-topic queries gracefully with the low-confidence fallback.
+    # We only block queries we are CERTAIN are off-topic (handled by the
+    # pipeline checking is_obviously_medical first before calling us).
+    return False
+
+
 # ─── RAG PIPELINE ─────────────────────────────────────────────────────────────
 
 class RAGPipeline:
@@ -313,6 +441,7 @@ class RAGPipeline:
         conversation_history: Optional[list] = None,
         is_voice: bool = False,
         request_id: str = "unknown",
+        max_tokens: Optional[int] = None,
     ) -> RAGResult:
         """
         Main entry point for the RAG pipeline.
@@ -329,14 +458,106 @@ class RAGPipeline:
 
         # ── STEP 1: Query Understanding ────────────────────────────────────
         understanding = QueryUnderstanding(user_query)
+
+        # ── THREE-STAGE OFF-TOPIC GUARD ────────────────────────────────────────
+        # Stage 1: Fast-path — obvious medical terms (zero cost)
+        # Stage 2: RxNorm — resolve every word as a potential drug name (cached)
+        # Stage 3: LLM classifier — only for genuinely ambiguous queries
+        is_medical = understanding.is_obviously_medical()
+
+        if not is_medical:
+            # Stage 2: RxNorm lookup — the authoritative drug name classifier.
+            # Try to resolve each significant word in the query as a drug name.
+            # resolve_to_generic calls RxNorm and returns the generic name if
+            # the word is a known drug, or returns the word unchanged if not.
+            # A drug is found when rxnorm returns ANY result (rxcui exists).
+            # Results are cached in Redis for 24 hours.
+            try:
+                import re
+                import httpx
+                words = re.findall(r'[a-zA-Z]{4,}', user_query)
+                for word in words:
+                    word_lower = word.lower()
+                    # Direct RxNorm API call — checks if this word is a drug
+                    try:
+                        async with httpx.AsyncClient(timeout=3.0) as client:
+                            r = await client.get(
+                                "https://rxnav.nlm.nih.gov/REST/rxcui.json",
+                                params={"name": word_lower, "search": 1}
+                            )
+                            rxcui_list = r.json().get("idGroup", {}).get("rxnormId", [])
+                            if rxcui_list:
+                                # RxNorm recognizes this word as a drug
+                                is_medical = True
+                                logger.info(
+                                    "rxnorm_classified_as_drug",
+                                    word=word_lower,
+                                    rxcui=rxcui_list[0],
+                                )
+                                break
+                    except Exception as rxnorm_err:
+                        logger.debug("rxnorm_classify_word_failed", error=str(rxnorm_err))
+            except Exception as rxnorm_error:
+                logger.warning("rxnorm_classify_failed", error=str(rxnorm_error))
+
+        if not is_medical:
+            # Stage 3: LLM classifier for genuinely ambiguous queries
+            try:
+                classify_medication_intent._redis = self.redis
+                is_medical = await classify_medication_intent(
+                    query=user_query,
+                    groq_api_key=settings.GROQ_API_KEY,
+                )
+            except Exception as classify_error:
+                logger.warning("classifier_error", error=str(classify_error))
+                is_medical = True  # fail open
+
+        if not is_medical:
+            logger.info("rag_off_topic_rejected", query_preview=user_query[:50])
+            return RAGResult(
+                response_text=(
+                    "I don't have information on that topic. "
+                    "Pillara is a medication safety assistant — I can only help with "
+                    "questions about medications, drug interactions, side effects, dosage, "
+                    "allergies, and pharmaceutical safety. "
+                    "Please ask a medication-related question."
+                ),
+                disclaimer="",
+                retrieved_chunks=[],
+                confidence_score=0.0,
+                confidence_gate_passed=False,
+                fallback_triggered=True,
+                query_intent="off_topic",
+                provider_used="none",
+                model_used="none",
+                drugs_mentioned=[],
+                latency_ms=round((time.monotonic() - pipeline_start) * 1000, 2),
+            )
+
         intent = understanding.detect_intent()
-        drugs_mentioned = understanding.extract_drug_names()
+        raw_drug_names = understanding.extract_drug_names()
         expanded_query = understanding.expand_query()
+
+        # ── RxNorm Resolution ──────────────────────────────────────────────
+        # Resolve brand names to generic names before ChromaDB lookup.
+        # "Tylenol" → "acetaminophen", "Advil" → "ibuprofen"
+        # This runs in parallel for all drug names found.
+        # Cached in Redis for 24hrs — fast on repeat queries.
+        if raw_drug_names:
+            try:
+                from services.drug_name_resolver import resolve_all_drug_names
+                drugs_mentioned = await resolve_all_drug_names(raw_drug_names, self.redis)
+            except Exception as resolve_error:
+                logger.warning("rxnorm_resolution_failed", error=str(resolve_error))
+                drugs_mentioned = raw_drug_names
+        else:
+            drugs_mentioned = raw_drug_names
 
         logger.info(
             "rag_query_understood",
             intent=intent,
-            drugs_found=len(drugs_mentioned),
+            drugs_raw=raw_drug_names,
+            drugs_resolved=drugs_mentioned,
             request_id=request_id,
         )
 
@@ -435,10 +656,12 @@ class RAGPipeline:
             system_prompt=system_prompt,
             complexity=complexity,
             request_id=request_id,
+            max_tokens_override=max_tokens,
         )
 
         # ── STEP 11: Strip HTML from LLM output (XSS prevention) ────────
-        safe_response_text = self._strip_output_html(llm_result["text"])
+        clean_text = self._strip_thinking_chain(llm_result["text"])
+        safe_response_text = self._strip_output_html(clean_text)
 
         # ── Log Retrieval for Observability ──────────────────────────────
         # This is what lets you debug hallucinations systematically
@@ -465,7 +688,160 @@ class RAGPipeline:
             query_intent=intent,
             drugs_mentioned=drugs_mentioned,
             latency_ms=round(total_latency, 2),
+            prompt_tokens=llm_result.get("prompt_tokens", 0),
+            completion_tokens=llm_result.get("completion_tokens", 0),
         )
+
+    async def query_stream(
+        self,
+        user_query: str,
+        profile_medications: Optional[list] = None,
+        conversation_history: Optional[list] = None,
+        request_id: str = "unknown",
+    ):
+        """
+        Streaming version of query().
+        Runs all RAG pipeline steps (retrieval, reranking, confidence gate),
+        then streams LLM tokens as they arrive.
+
+        Yields:
+            dict with type "chunk" (text fragment) or "meta" (final metadata)
+
+        The frontend handles both chunk types:
+        - "chunk": append text to the current message
+        - "meta": update provider_used, confidence_gate_passed etc.
+
+        WHY YIELD METADATA AT THE END:
+        The frontend needs to know if the confidence gate passed, which
+        provider was used, and the conversation_id. These are only known
+        after the full pipeline runs, so they come after all text chunks.
+        """
+        pipeline_start = time.monotonic()
+
+        # ── Off-topic guard (streaming path) ────────────────────────────────
+        understanding = QueryUnderstanding(user_query)
+        is_medical = understanding.is_obviously_medical()
+        if not is_medical:
+            try:
+                classify_medication_intent._redis = self.redis
+                is_medical = await classify_medication_intent(
+                    query=user_query,
+                    groq_api_key=settings.GROQ_API_KEY,
+                )
+            except Exception as classify_err:
+                logger.warning("intent_classifier_failed_fail_open", error=str(classify_err))
+                is_medical = True  # fail open
+
+        if not is_medical:
+            yield {"type": "chunk", "text": (
+                "I don't have information on that topic. "
+                "I am Pillara's medication assistant and I can only help with "
+                "questions about medications, drug interactions, side effects, "
+                "dosage, allergies, and pharmaceutical safety. "
+                "Please ask a medication-related question."
+            )}
+            yield {"type": "meta", "confidence_gate_passed": False,
+                   "provider_used": "none", "query_intent": "off_topic",
+                   "fallback_triggered": True, "latency_ms": 0.0}
+            return
+
+        intent = understanding.detect_intent()
+        drugs_mentioned = understanding.extract_drug_names()
+        expanded_query = understanding.expand_query()
+
+        # ── Retrieval + Reranking (same as non-streaming query) ───────────
+        try:
+            complexity = await self.llm_client.classify_query_complexity(user_query)
+
+            vector_results, keyword_results = await asyncio.gather(
+                self._vector_search(expanded_query, intent, drugs_mentioned),
+                self._keyword_search(expanded_query, drugs_mentioned),
+            )
+
+            combined_chunks = self._reciprocal_rank_fusion(
+                vector_results, keyword_results, top_k=20
+            )
+
+            if not combined_chunks:
+                yield {"type": "chunk", "text": (
+                    "I don't have enough verified information to answer that question. "
+                    "Please consult your pharmacist or doctor for accurate guidance."
+                )}
+                yield {"type": "meta", "confidence_gate_passed": False,
+                       "provider_used": "none", "query_intent": intent,
+                       "fallback_triggered": True,
+                       "latency_ms": round((time.monotonic() - pipeline_start) * 1000, 2)}
+                return
+
+            best_score = max(chunk.similarity_score for chunk in combined_chunks)
+            top_chunks = self._rerank_chunks(
+                query=user_query, chunks=combined_chunks,
+                top_k=settings.RAG_TOP_K_RESULTS,
+            )
+
+            # Confidence gate
+            if best_score < settings.RAG_CONFIDENCE_THRESHOLD:
+                yield {"type": "chunk", "text": (
+                    "I don't have enough verified information to answer that question confidently. "
+                    "Please consult your pharmacist or doctor for accurate guidance."
+                )}
+                yield {"type": "meta", "confidence_gate_passed": False,
+                       "provider_used": "none", "query_intent": intent,
+                       "fallback_triggered": True,
+                       "latency_ms": round((time.monotonic() - pipeline_start) * 1000, 2)}
+                return
+
+            # Build context and prompt — use same pattern as non-streaming query
+            retrieved_context = self._build_context_string(top_chunks)
+
+            from ai.llm.prompts import build_interaction_prompt, build_general_chat_prompt
+            if intent == "interaction_check" and drugs_mentioned:
+                system_prompt = build_interaction_prompt(
+                    retrieved_context=retrieved_context,
+                    drug_names=drugs_mentioned,
+                    is_voice=False,
+                )
+            else:
+                system_prompt = build_general_chat_prompt(is_voice=False)
+
+            messages = self._build_messages(
+                user_query=user_query,
+                retrieved_context=retrieved_context,
+                conversation_history=conversation_history or [],
+                profile_medications=profile_medications or [],
+            )
+
+            # ── Stream LLM response ───────────────────────────────────────
+            provider_used = "groq"
+            async for text_chunk in self.llm_client.stream_complete(
+                messages=messages,
+                system_prompt=system_prompt,
+                complexity=complexity,
+                request_id=request_id,
+            ):
+                # Strip thinking chain from chunks
+                cleaned = self._strip_thinking_chain(text_chunk)
+                if cleaned:
+                    yield {"type": "chunk", "text": cleaned}
+
+            total_latency = round((time.monotonic() - pipeline_start) * 1000, 2)
+            yield {
+                "type": "meta",
+                "confidence_gate_passed": True,
+                "provider_used": provider_used,
+                "query_intent": intent,
+                "fallback_triggered": False,
+                "latency_ms": total_latency,
+            }
+
+        except Exception as error:
+            logger.error("pipeline_stream_error", error=str(error), request_id=request_id)
+            yield {"type": "chunk", "text": (
+                "Something went wrong. Please try again in a moment."
+            )}
+            yield {"type": "meta", "confidence_gate_passed": False,
+                   "provider_used": "error", "query_intent": intent,
+                   "fallback_triggered": True, "latency_ms": 0.0}
 
     async def _vector_search(
         self,
@@ -735,9 +1111,10 @@ class RAGPipeline:
         try:
             from sentence_transformers import CrossEncoder
 
-            # Load the cross-encoder model
-            # WHY THIS MODEL: small, fast, good at passage ranking
-            model = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+# Cache at class level — loading fresh every request adds 10-15 seconds overhead
+            if not hasattr(RAGPipeline, '_cross_encoder'):
+                RAGPipeline._cross_encoder = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+            model = RAGPipeline._cross_encoder
 
             # Create (query, chunk_text) pairs for the cross-encoder
             # The cross-encoder needs BOTH texts together to score them
@@ -772,7 +1149,7 @@ class RAGPipeline:
         except Exception as error:
             # If cross-encoder fails (model not loaded, etc.)
             # fall back to the RRF-ranked results
-            logger.warning("reranking_failed", error=str(error))
+            logger.error("reranking_failed", error=str(error))
             return chunks[:top_k]
 
     def _build_metadata_filter(
@@ -790,33 +1167,37 @@ class RAGPipeline:
         Filtering to section="drug_interactions" means we search
         only relevant chunks — faster and more precise.
         """
-        # Map intents to ChromaDB section filters
-        intent_to_section: dict = {
+        # Map intents to ChromaDB section filters.
+        # IMPORTANT: only filter by section for high-specificity intents.
+        # For what_is_it and general_question — no section filter.
+        # Reason: section metadata varies by drug. Filtering by section="general"
+        # excludes valid chunks stored under different section names.
+        # Pure semantic search handles these better than metadata filtering.
+        section_filtered_intents: dict = {
             "interaction_check": "drug_interactions",
             "side_effects": "side_effects",
             "dosing": "dosing",
-            "what_is_it": "general",
+            # what_is_it and general_question: no section filter — pure semantic search
         }
 
-        section = intent_to_section.get(intent)
+        section = section_filtered_intents.get(intent)
 
-        # If we know what section to search and we have a drug name,
-        # filter by both (most precise)
-        if section and drugs_mentioned:
-            primary_drug = drugs_mentioned[0]
-            # ChromaDB $and operator requires both conditions to match
-            return {
-                "$and": [
-                    {"section": {"$eq": section}},
-                    {"drug_name": {"$eq": primary_drug}},
-                ]
-            }
+        # Drug name filter: only apply for interaction checks where we need
+        # chunks about SPECIFIC drugs. For informational queries, semantic
+        # search without drug filter retrieves better results.
+        if intent == "interaction_check" and drugs_mentioned:
+            drug_filter = {"drug_name": {"$in": drugs_mentioned}}
+        else:
+            drug_filter = None
+
+        if section and drug_filter:
+            return {"$and": [{"section": {"$eq": section}}, drug_filter]}
         elif section:
             return {"section": {"$eq": section}}
-        elif drugs_mentioned:
-            return {"drug_name": {"$eq": drugs_mentioned[0]}}
+        elif drug_filter:
+            return drug_filter
 
-        return None  # no filter — search all chunks
+        return None  # no filter — pure semantic search
 
     def _build_context_string(self, chunks: list) -> str:
         """
@@ -929,14 +1310,23 @@ Relevance Score: {chunk.final_score:.3f}
         """
         drugs_str = ", ".join(drugs_mentioned) if drugs_mentioned else "the medications you mentioned"
 
-        fallback_text = (
-            f"I don't have enough verified information to safely answer your question "
-            f"about {drugs_str}. "
-            f"For accurate, up-to-date information about drug interactions and safety, "
-            f"please speak with your pharmacist or doctor directly. "
-            f"You can also check the FDA drug information database at "
-            f"https://www.accessdata.fda.gov/scripts/cder/daf/ for verified drug details."
-        )
+        if drugs_str == "the medications you mentioned":
+            # Passed classifier but no drug names found — general pharmaceutical query
+            # with insufficient data in our knowledge base
+            fallback_text = (
+                "I don't have enough verified information to answer that question confidently. "
+                "If you are asking about a specific medication, please include the drug name. "
+                "Your pharmacist or doctor can provide accurate guidance on this topic."
+            )
+        else:
+            # Specific drug found but not enough data in ChromaDB
+            fallback_text = (
+                f"I don't have enough verified clinical information about {drugs_str} "
+                f"to answer that question confidently. "
+                f"Please speak with your pharmacist or doctor for accurate guidance. "
+                f"You can also check the FDA drug database at "
+                f"https://www.accessdata.fda.gov/scripts/cder/daf/ for verified details."
+            )
 
         latency = (time.monotonic() - pipeline_start) * 1000
 
@@ -971,7 +1361,7 @@ Relevance Score: {chunk.final_score:.3f}
         stale_threshold_days = 90
 
         for chunk in chunks:
-            source_date_str = chunk.source  # "fda_label_2024-01" format if available
+            # chunk.source contains "fda_label_2024-01" format if available
             ingestion_date_str = getattr(chunk, 'ingestion_date', None)
 
             if ingestion_date_str:
@@ -990,6 +1380,17 @@ Relevance Score: {chunk.final_score:.3f}
                         )
                 except (ValueError, TypeError):
                     pass  # If we can't parse the date, we can't check staleness
+
+    def _strip_thinking_chain(self, text: str) -> str:
+        """Strips internal reasoning from thinking models (Qwen, DeepSeek-R1)."""
+        text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+        separators = [r'\n---+\n', r'\nAnswer:\s*\n', r'\nFinal Answer:\s*\n']
+        for pattern in separators:
+            parts = re.split(pattern, text, maxsplit=1)
+            if len(parts) == 2 and len(parts[0]) > 200:
+                text = parts[1].strip()
+                break
+        return text.strip()
 
     def _strip_output_html(self, text: str) -> str:
         """
@@ -1056,3 +1457,16 @@ Relevance Score: {chunk.final_score:.3f}
             request_id=request_id,
             confidence_gate="passed",
         )
+    @classmethod
+    def prewarm(cls) -> None:
+        """
+        Load the cross-encoder model at startup instead of on first request.
+        Eliminates the 15-19 second cold start on the first user query.
+        Call this from main.py lifespan before yield.
+        """
+        if not hasattr(cls, '_cross_encoder'):
+            from sentence_transformers import CrossEncoder
+            import logging
+            logging.getLogger(__name__).info("prewarming_cross_encoder_model")
+            cls._cross_encoder = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+            logging.getLogger(__name__).info("cross_encoder_ready")

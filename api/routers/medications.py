@@ -1,15 +1,8 @@
 # api/routers/medications.py
-#
-# MEDICATION ENDPOINTS:
-# GET    /medications/              — list medications for a profile
-# POST   /medications/              — add a medication
-# GET    /medications/{id}          — get one medication (IDOR protected)
-# PATCH  /medications/{id}          — update a medication (IDOR protected)
-# DELETE /medications/{id}          — soft-delete a medication (IDOR protected)
 
 from fastapi import APIRouter, Query, Request
 
-from api.dependencies import CurrentUser, DBSession, RedisClient, VerifiedUser
+from api.dependencies import CurrentUser, DBSession, VerifiedUser
 from services.medication_service import MedicationService
 from schemas.all_schemas import (
     MedicationCreate,

@@ -2,7 +2,7 @@
 // Central API client for all Pillara backend calls.
 // All components import from here — never fetch directly.
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000'
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 // ── Token management ─────────────────────────────────────────────────────────
 // Tokens live in localStorage for simplicity in dev.
@@ -63,7 +63,46 @@ async function apiFetch<T>(path: string, options: FetchOptions = {}): Promise<T>
 
   const data = await response.json()
 
-  if (!response.ok) {
+    if (!response.ok) {
+    if (
+      response.status === 401 &&
+      data.error === 'authentication_required' &&
+      typeof window !== 'undefined' &&
+      !window.location.pathname.includes('/login') &&
+      !window.location.pathname.includes('/register')
+    ) {
+      // Try silent token refresh before logging out
+      const refreshToken = localStorage.getItem('pillara_refresh_token')
+      if (refreshToken) {
+        try {
+          const refreshRes = await fetch(`${API_BASE}/api/v1/auth/refresh`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ refresh_token: refreshToken }),
+          })
+          if (refreshRes.ok) {
+            const refreshData = await refreshRes.json()
+            setTokens(refreshData.access_token, refreshData.refresh_token)
+            const retryHeaders: Record<string, string> = {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${refreshData.access_token}`,
+            }
+            const retryRes = await fetch(`${API_BASE}${path}`, {
+              method,
+              headers: retryHeaders,
+              body: body ? JSON.stringify(body) : undefined,
+            })
+            if (retryRes.ok) return retryRes.json() as T
+          }
+        } catch {
+          // Refresh failed — fall through to logout
+        }
+      }
+      clearTokens()
+      window.location.href = '/login'
+      throw new APIError(401, 'authentication_required', 'Session expired. Please sign in again.')
+    }
+
     throw new APIError(
       response.status,
       data.error || 'unknown_error',
@@ -132,6 +171,11 @@ export interface Profile {
   medical_conditions: string | null
   is_primary: boolean
   created_at: string
+}
+
+export interface ProfileWithRole extends Profile {
+  role: string
+  is_shared_with_me: boolean
 }
 
 export const profiles = {

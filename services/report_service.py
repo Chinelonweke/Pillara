@@ -47,13 +47,13 @@ class ReportService:
         # Fetch medications (already IDOR-safe — profile is verified)
         med_query = select(Medication).where(Medication.profile_id == profile_id)
         if not include_inactive:
-            med_query = med_query.where(Medication.is_active == True)
+            med_query = med_query.where(Medication.is_active.is_(True))
         med_result = await self.db.execute(med_query)
         medications = list(med_result.scalars().all())
 
         try:
             html_content = self._render_html(profile=profile, medications=medications)
-            pdf_path = await self._generate_pdf(html_content)
+            _ = await self._generate_pdf(html_content)
         except Exception as error:
             logger.error("report_generation_failed", error=str(error), profile_id=profile_id)
             raise PDFGenerationError()

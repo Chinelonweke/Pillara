@@ -1,15 +1,11 @@
 # main.py
-# SECURITY UPDATES FROM AUDIT:
-# 1. production_safety_check() called at startup — refuses to start with DEBUG=True in prod
-# 2. init_chromadb_with_retry() called at startup — verifies ChromaDB before serving traffic
-# 3. LLM output stripped of HTML before returning to client (XSS prevention)
-
+import asyncio
 from contextlib import asynccontextmanager
-
+from api.routers import auth, medications, interactions, ai_chat, reminders, profiles, reports, sharing, notifications
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-
+from api.middleware import RequestContextMiddleware, SecurityHeadersMiddleware
 from core.config import settings
 from core.database import close_database, init_database, init_chromadb_with_retry
 from core.exceptions import PillaraError, RateLimitError
@@ -17,45 +13,52 @@ from core.redis_client import close_redis, init_redis
 from core.security import production_safety_check
 from monitoring.logger import configure_logging, get_logger
 from monitoring.sentry_setup import init_sentry
-from schemas.all_schemas import ErrorResponse, HealthCheckResponse
 
 configure_logging()
 logger = get_logger(__name__)
 
-# WHY SENTRY INITIALIZES HERE (module level, before lifespan):
-# Sentry must be active before ANYTHING else runs — including the lifespan
-# startup sequence. If the database connection fails at startup, or if an
-# import error occurs in a router, Sentry needs to already be initialized
-# to capture it. Initializing inside lifespan would mean startup errors
-# before that line are invisible to Sentry entirely.
-# init_sentry() is a no-op if SENTRY_DSN is not configured, so this is
-# always safe to call unconditionally.
 init_sentry()
+
+
+async def _keep_neondb_awake() -> None:
+    from sqlalchemy import text
+    from core.database import AsyncSessionFactory
+
+    while True:
+        await asyncio.sleep(240)
+        try:
+            async with AsyncSessionFactory() as db:
+                await db.execute(text("SELECT 1"))
+        except Exception as error:
+            logger.warning("neondb_keepalive_failed", error=str(error))
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # ── STARTUP ──────────────────────────────────────────────────────────────
     logger.info("pillara_starting", version=settings.APP_VERSION, environment=settings.ENVIRONMENT)
-
-    # SECURITY FIX: Refuse to start with unsafe production config
     production_safety_check()
-
     await init_database()
     await init_redis()
 
-    # RELIABILITY FIX: Verify ChromaDB with retry before serving any traffic
     try:
         await init_chromadb_with_retry()
     except RuntimeError as error:
         logger.warning("chromadb_unavailable_at_startup", error=str(error))
-        # We warn but don't crash — the app can serve non-AI endpoints even without ChromaDB
-        # AI endpoints will fail gracefully if ChromaDB is down
+
+    asyncio.create_task(_keep_neondb_awake())
+
+    # Pre-warm cross-encoder — eliminates 15-19s cold start on first request
+    try:
+        from ai.rag.pipeline import RAGPipeline
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, RAGPipeline.prewarm)
+        logger.info("cross_encoder_prewarmed")
+    except Exception as prewarm_error:
+        logger.warning("cross_encoder_prewarm_failed", error=str(prewarm_error))
 
     logger.info("pillara_ready", version=settings.APP_VERSION)
     yield
 
-    # ── SHUTDOWN ─────────────────────────────────────────────────────────────
     logger.info("pillara_shutting_down")
     await close_database()
     await close_redis()
@@ -72,21 +75,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-from api.middleware import RequestContextMiddleware, SecurityHeadersMiddleware
 
-# WHY THESE TWO MIDDLEWARES, AND WHY THIS ORDER:
-# Starlette middleware runs as a stack — the LAST one added runs FIRST on
-# the way in. We want RequestContextMiddleware to run before anything else,
-# since it sets request.state.ip_hash and request.state.request_id, which
-# route handlers (like auth.register) depend on existing. SecurityHeadersMiddleware
-# adds response headers (CSP, X-Frame-Options, etc.) on the way out, and doesn't
-# depend on anything else having run first.
-#
-# BUG THIS FIXES: both of these classes were fully written in api/middleware.py
-# but never actually registered with app.add_middleware() — they existed in the
-# codebase but never ran. This caused AttributeError: 'State' object has no
-# attribute 'ip_hash' the first time any endpoint depending on it was called
-# (e.g. POST /api/v1/auth/register).
+
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RequestContextMiddleware)
 
@@ -98,18 +88,26 @@ app.add_middleware(
     allow_headers=["Content-Type", "Authorization", "X-Request-ID"],
 )
 
-# Register routers
+# Prometheus metrics — auto-instruments all FastAPI endpoints
 try:
-    from api.routers import auth, medications, interactions, ai_chat, reminders, profiles, reports
-    app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
-    app.include_router(profiles.router, prefix="/api/v1/profiles", tags=["Profiles"])
-    app.include_router(medications.router, prefix="/api/v1/medications", tags=["Medications"])
-    app.include_router(interactions.router, prefix="/api/v1/interactions", tags=["Drug Interactions"])
-    app.include_router(ai_chat.router, prefix="/api/v1/ai", tags=["AI Assistant"])
-    app.include_router(reminders.router, prefix="/api/v1/reminders", tags=["Reminders"])
-    app.include_router(reports.router, prefix="/api/v1/reports", tags=["Reports"])
-except ImportError as import_error:
-    logger.warning("some_routers_not_loaded", error=str(import_error))
+    from prometheus_fastapi_instrumentator import Instrumentator
+    Instrumentator(
+        should_group_status_codes=True,
+        excluded_handlers=["/health", "/metrics", "/"],
+    ).instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
+except ImportError:
+    logger.warning("prometheus_instrumentator_not_installed")
+
+
+app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
+app.include_router(profiles.router, prefix="/api/v1/profiles", tags=["Profiles"])
+app.include_router(sharing.router, prefix="/api/v1/sharing", tags=["Sharing"])
+app.include_router(medications.router, prefix="/api/v1/medications", tags=["Medications"])
+app.include_router(interactions.router, prefix="/api/v1/interactions", tags=["Drug Interactions"])
+app.include_router(ai_chat.router, prefix="/api/v1/ai", tags=["AI Assistant"])
+app.include_router(reminders.router, prefix="/api/v1/reminders", tags=["Reminders"])
+app.include_router(reports.router, prefix="/api/v1/reports", tags=["Reports"])
+app.include_router(notifications.router, prefix="/api/v1/notifications", tags=["Notifications"])
 
 
 @app.exception_handler(PillaraError)
@@ -118,6 +116,36 @@ async def pillara_error_handler(request: Request, error: PillaraError) -> JSONRe
         status_code=error.status_code,
         content=error.to_dict(),
         headers=({"Retry-After": str(error.retry_after_seconds)} if isinstance(error, RateLimitError) else {}),
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, error: Exception) -> JSONResponse:
+    """
+    Catch-all handler for any unhandled exception.
+    Logs at CRITICAL level so it appears in Sentry and structured logs.
+    Returns a clear error response instead of closing the connection silently.
+
+    WHY THIS MATTERS:
+    Without this, unhandled exceptions cause the server to close the connection
+    with no response body — the client sees ERR_EMPTY_RESPONSE and has no idea
+    what went wrong. This handler ensures every failure is visible.
+    """
+    import traceback
+    logger.critical(
+        "unhandled_exception",
+        error=str(error),
+        error_type=type(error).__name__,
+        path=str(request.url.path),
+        method=request.method,
+        traceback=traceback.format_exc(),
+    )
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "internal_error",
+            "message": "An unexpected error occurred. Our team has been notified.",
+        },
     )
 
 
@@ -136,8 +164,6 @@ async def generic_error_handler(request: Request, error: Exception) -> JSONRespo
     except Exception:
         pass
 
-    # SECURITY: Never expose exception details to the client in any environment.
-    # The full error is logged internally — the client gets a generic message only.
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={"error": "internal_error", "message": "An unexpected error occurred. Our team has been notified."},
@@ -167,7 +193,13 @@ async def health_check() -> dict:
             settings=ChromaSettings(anonymized_telemetry=False),
         )
         chroma_client.heartbeat()
-        chroma_status = "healthy"
+        collection = chroma_client.get_collection(settings.CHROMA_COLLECTION_NAME)
+        doc_count = collection.count()
+        if doc_count < 50:
+            chroma_status = f"degraded — only {doc_count} documents in collection"
+            logger.warning("chromadb_low_document_count", doc_count=doc_count)
+        else:
+            chroma_status = f"healthy ({doc_count} documents)"
     except Exception as e:
         chroma_status = f"unhealthy: {type(e).__name__}"
 
@@ -176,7 +208,10 @@ async def health_check() -> dict:
         "redis": redis_status,
         "chromadb": chroma_status,
     }
-    all_healthy = all(v == "healthy" for v in services.values())
+    all_healthy = all(
+        v == "healthy" or v.startswith("healthy")
+        for v in services.values()
+    )
 
     return {
         "status": "healthy" if all_healthy else "degraded",
@@ -188,11 +223,9 @@ async def health_check() -> dict:
 
 @app.get("/metrics", tags=["Monitoring"], include_in_schema=False)
 async def metrics():
-    """Prometheus metrics endpoint — scraped by monitoring infrastructure."""
     from fastapi.responses import Response
     from monitoring.metrics import get_metrics
     from prometheus_client import CONTENT_TYPE_LATEST
-
     return Response(content=get_metrics(), media_type=CONTENT_TYPE_LATEST)
 
 

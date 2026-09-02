@@ -13,7 +13,6 @@
 from fastapi import APIRouter, Depends, Request
 
 from api.dependencies import CurrentUser, DBSession, RedisClient, rate_limit_auth
-from core.exceptions import AuthenticationError
 from core.security import decode_token
 from schemas.all_schemas import (
     LoginRequest,
@@ -261,3 +260,109 @@ async def get_me(current_user: CurrentUser) -> dict:
         # (e.g., account settings page — add a dedicated endpoint for that).
         # Minimise PHI surface area in API responses.
     }
+
+@router.post(
+    "/resend-verification",
+    response_model=SuccessResponse,
+    summary="Resend verification email",
+)
+async def resend_verification(
+    current_user: CurrentUser,
+    db: DBSession,
+) -> SuccessResponse:
+    if current_user.is_verified:
+        return SuccessResponse(message="Your email is already verified.")
+
+    if not current_user.verification_token:
+        return SuccessResponse(message="No verification pending. Please contact support.")
+
+    from services.email_service import send_verification_email
+    await send_verification_email(
+        to_email=current_user.email,
+        verification_token=current_user.verification_token,
+    )
+    return SuccessResponse(message="Verification email sent. Please check your inbox.")
+
+@router.post(
+    "/change-password",
+    response_model=SuccessResponse,
+    summary="Change account password",
+)
+async def change_password(
+    body: dict,
+    current_user: CurrentUser,
+    db: DBSession,
+) -> SuccessResponse:
+    """
+    Change the authenticated user's password.
+    Requires current password for verification.
+    """
+    from core.security import verify_password, hash_password
+    current_password = body.get("current_password", "")
+    new_password = body.get("new_password", "")
+
+    if not current_password or not new_password:
+        from core.exceptions import ValidationError
+        raise ValidationError("Both current and new password are required.")
+
+    if not verify_password(current_password, current_user.hashed_password):
+        from core.exceptions import AuthenticationError
+        raise AuthenticationError("Current password is incorrect.")
+
+    if len(new_password) < 8:
+        from core.exceptions import ValidationError
+        raise ValidationError("New password must be at least 8 characters.")
+
+    current_user.hashed_password = hash_password(new_password)
+    await db.commit()
+
+    logger.info("password_changed", user_id=str(current_user.id))
+    return SuccessResponse(message="Password changed successfully.")
+
+
+@router.delete(
+    "/account",
+    response_model=SuccessResponse,
+    summary="Delete account — NDPR right to erasure",
+)
+async def delete_account(
+    body: dict,
+    current_user: CurrentUser,
+    db: DBSession,
+) -> SuccessResponse:
+    """
+    Permanently deletes the user account and all associated data.
+    NDPR right to erasure — all personal data is removed.
+    Requires password confirmation.
+    """
+    from core.security import verify_password
+    from monitoring.audit import AuditLogger, AuditEventType
+    from sqlalchemy import text
+
+    password = body.get("password", "")
+    if not password:
+        from core.exceptions import ValidationError
+        raise ValidationError("Password confirmation is required to delete your account.")
+
+    if not verify_password(password, current_user.hashed_password):
+        from core.exceptions import AuthenticationError
+        raise AuthenticationError("Incorrect password.")
+
+    user_id = str(current_user.id)
+
+    # Log before deletion
+    from monitoring.audit import AuditOutcome
+    audit = AuditLogger(db=db)
+    await audit.log(
+        event_type=AuditEventType.ACCOUNT_DELETED,
+        user_id=user_id,
+        outcome=AuditOutcome.SUCCESS,
+    )
+    await db.commit()
+
+    # Hard delete — cascade removes profiles, medications, reminders, sessions
+    await db.execute(text("DELETE FROM users WHERE id = :id"), {"id": user_id})
+    await db.commit()
+
+    logger.info("account_deleted", user_id=user_id)
+    return SuccessResponse(message="Your account and all associated data have been permanently deleted.")

@@ -1,52 +1,11 @@
 # services/allergy_service.py
-#
-# WHY DETERMINISTIC (not LLM-based):
-# Drug-class allergy cross-reactivity for well-known classes is not a
-# probabilistic judgment — it's established, documented medical fact.
-# "Amoxicillin is a penicillin-class antibiotic" is not something that
-# needs LLM reasoning; it's a lookup. Running known cross-reactivity
-# through an LLM introduces unnecessary uncertainty into a safety-critical
-# check that has a correct, deterministic answer.
-#
-# The LLM/RAG pipeline is the right tool for drug-drug interaction
-# checking, where severity genuinely varies by patient context and
-# combinations can be nuanced. Allergy cross-reactivity for documented
-# classes is different: it's always high-severity, always requires
-# clinical review, and should never be downplayed by a model that
-# retrieves slightly different context on a different run.
-#
-# WHY THIS FILE (not inline in the router):
-# Allergy checking will eventually be called from multiple places —
-# the interaction check endpoint, medication add endpoint (future),
-# AI chat context (future). Centralizing the logic here means a single
-# audit, a single update when new drug classes are added, and no
-# duplicated rule maintenance across files.
-#
-# LIMITATION / KNOWN GAP:
-# This mapping covers major, well-documented drug classes. It does NOT
-# cover every possible allergy cross-reactivity — drug allergy medicine
-# is genuinely complex, and exhaustive coverage requires integration
-# with a clinical drug database (RxNorm, DrugBank, etc.), which is the
-# right long-term path. This deterministic layer catches the clear,
-# high-confidence cases reliably. The AI/RAG layer handles nuance.
-# Together they're stronger than either alone.
+
 
 from typing import Optional
 from schemas.all_schemas import AllergyWarning
 from monitoring.logger import get_logger
 
 logger = get_logger(__name__)
-
-# ─── DRUG CLASS MEMBERSHIP MAP ─────────────────────────────────────────────────
-# Maps drug names (lowercase) to the allergy class they belong to.
-# When a patient has a documented allergy to a class, any drug in that
-# class in this map triggers a high-severity warning.
-#
-# Sources: standard pharmacology references (FDA drug labels, clinical
-# pharmacology textbooks). These are well-established, not edge cases.
-#
-# TO EXTEND: add new entries here. Key = lowercase drug name,
-# value = the allergy class string (must match a key in ALLERGY_CLASSES below).
 
 DRUG_TO_CLASS: dict[str, list[str]] = {
     # ── Penicillins ────────────────────────────────────────────────────────────
@@ -86,7 +45,7 @@ DRUG_TO_CLASS: dict[str, list[str]] = {
     "dapsone":              ["sulfonamide"],
     "furosemide":           ["sulfonamide"],       # sulfa-based diuretic
     "hydrochlorothiazide":  ["sulfonamide"],       # sulfa-based diuretic
-    "celecoxib":            ["sulfonamide"],       # sulfa-based COX-2 inhibitor
+   
 
     # ── NSAIDs ────────────────────────────────────────────────────────────────
     "ibuprofen":            ["nsaid"],
@@ -297,34 +256,6 @@ async def check_allergies(
     redis=None,
     request_id: str = "unknown",
 ) -> list[AllergyWarning]:
-    """
-    Checks a list of drug names against a patient's documented allergies.
-    Returns AllergyWarning objects for any known cross-reactivity found.
-
-    THREE-LAYER LOOKUP (in order, fastest to most authoritative):
-    Layer 1: Local deterministic map (DRUG_TO_CLASS) — zero latency,
-             covers 60+ high-frequency drugs, always runs first.
-    Layer 2: RxNorm API — authoritative drug→class taxonomy for ALL
-             FDA-approved drugs. Runs only when Layer 1 misses.
-    Layer 3: MedRT via RxClass — explicit allergy cross-sensitivity data,
-             highest clinical accuracy. Runs alongside Layer 2.
-    Layers 2+3 results are cached in Redis permanently — each drug is
-    looked up via network exactly once per Redis lifetime.
-
-    Never raises — logs on unexpected error and returns empty list.
-    Caller receives a complete, typed result regardless of internal state.
-
-    Args:
-        drug_names: list of drug name strings to check
-        known_allergies_str: raw string from profile.known_allergies
-                             (e.g. "Penicillin, Sulfa") — comma-separated
-        redis: Redis client for Layer 2/3 caching (optional — if None,
-               Layer 2/3 fallback is skipped, Layer 1 still runs fully)
-        request_id: for structured log correlation
-
-    Returns:
-        list[AllergyWarning] — empty if no warnings found. Never None.
-    """
     warnings: list[AllergyWarning] = []
 
     if not known_allergies_str or not known_allergies_str.strip():
@@ -462,18 +393,6 @@ async def check_allergies(
                     break
 
     except Exception as error:
-        # WHY LOG-AND-RETURN rather than raise:
-        # A bug in allergy checking should never silently eat itself OR
-        # crash the entire interaction check. We log loudly (ERROR level,
-        # will surface in Sentry once wired) and return empty — the caller
-        # still gets a complete response, the LLM/RAG pipeline still runs,
-        # and the error is visible and traceable via request_id.
-        #
-        # This is NOT the same as silent failure — this logs at ERROR
-        # level with full context. The distinction: silent failure means
-        # nothing is recorded and no one knows. This means the error is
-        # fully visible to the engineering team while the user experience
-        # degrades gracefully rather than crashing.
         logger.error(
             "allergy_check_error",
             error=str(error),

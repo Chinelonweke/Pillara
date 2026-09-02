@@ -1,10 +1,10 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useRef, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { auth, APIError } from '@/lib/api'
 
-export default function VerifyEmailPage() {
+function VerifyEmailContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const token = searchParams.get('token')
@@ -12,29 +12,34 @@ export default function VerifyEmailPage() {
   const [status, setStatus] = useState<'verifying' | 'success' | 'error'>('verifying')
   const [message, setMessage] = useState('')
 
-  useEffect(() => {
-    if (!token) {
+  const hasRun = useRef(false)
+
+useEffect(() => {
+  if (hasRun.current) return
+  hasRun.current = true
+
+  if (!token) {
+    setTimeout(() => {
       setStatus('error')
       setMessage('No verification token found. Check the link in your email.')
-      return
-    }
+    }, 0)
+    return
+  }
 
-    auth.verifyEmail(token)
-      .then(() => {
-        setStatus('success')
-        // Redirect to dashboard after 2 seconds
-        setTimeout(() => router.push('/dashboard'), 2000)
-      })
-      .catch((err) => {
-        setStatus('error')
-        if (err instanceof APIError) {
-          setMessage(err.message)
-        } else {
-          setMessage('Verification failed. The link may have expired.')
-        }
-      })
-  }, [token, router])
-
+  auth.verifyEmail(token)
+    .then(() => {
+      setStatus('success')
+      setTimeout(() => router.push('/dashboard'), 2000)
+    })
+    .catch((err) => {
+      setStatus('error')
+      if (err instanceof APIError) {
+        setMessage(err.message)
+      } else {
+        setMessage('Verification failed. The link may have expired.')
+      }
+    })
+}, [token, router])
   return (
     <div className="min-h-screen bg-[#0F1B2D] flex items-center justify-center px-4">
       <div className="w-full max-w-md text-center">
@@ -86,5 +91,17 @@ export default function VerifyEmailPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+export default function VerifyEmailPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-[#0F1B2D] flex items-center justify-center">
+        <div className="text-white text-sm">Loading…</div>
+      </div>
+    }>
+      <VerifyEmailContent />
+    </Suspense>
   )
 }

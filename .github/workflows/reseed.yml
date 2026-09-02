@@ -1,0 +1,29 @@
+name: Weekly Drug Knowledge Reseed
+
+on:
+  schedule:
+    - cron: '0 2 * * 0'  # Every Sunday at 2 AM UTC
+  workflow_dispatch:       # Allow manual trigger from GitHub Actions UI
+
+jobs:
+  reseed:
+    name: Reseed ChromaDB from FDA and RxNorm
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: SSH into production server and reseed
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: root
+          key: ${{ secrets.VPS_SSH_KEY }}
+          timeout: 600s
+          script: |
+            cd /opt/pillara
+            echo "Starting drug knowledge reseed..."
+            docker compose exec -T app python scripts/seed_drug_data.py
+            docker compose exec -T app python scripts/seed_drug_classes.py
+            echo "Reseed complete"

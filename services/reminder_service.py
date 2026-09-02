@@ -1,24 +1,7 @@
 # services/reminder_service.py
-#
-# RACE CONDITION FIX — SELECT FOR UPDATE SKIP LOCKED:
-# The ARQ worker fetches due reminders and sends notifications.
-# Without locking, two workers starting simultaneously both fetch the same reminder,
-# both send, user gets double notification.
-#
-# WITH SELECT FOR UPDATE SKIP LOCKED:
-# Worker 1 fetches reminder row and locks it.
-# Worker 2's query skips locked rows — it never sees the same reminder.
-# Zero double-sends even under parallel worker restart scenarios.
-#
-# The processing_locked_at column handles crash recovery:
-# If worker 1 crashes before finishing, its lock is held by the DB transaction.
-# When the transaction rolls back (connection lost), the lock is released.
-# processing_locked_at timestamp lets us detect stale in-progress reminders
-# that have been locked for more than 5 minutes — something went wrong.
-
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.exceptions import NotFoundError
@@ -44,7 +27,7 @@ class ReminderService:
             .where(
                 Profile.user_id == user_id,
                 Reminder.profile_id == profile_id,
-                Reminder.is_active == True,
+                Reminder.is_active.is_(True),
             )
             .order_by(Reminder.next_send_at.asc())
         )
@@ -69,7 +52,7 @@ class ReminderService:
             select(Medication).where(
                 Medication.id == reminder_data.medication_id,
                 Medication.profile_id == profile_id,
-                Medication.is_active == True,
+                Medication.is_active.is_(True),
             )
         )
         if not med_result.scalar_one_or_none():
@@ -124,28 +107,16 @@ class ReminderService:
         )
 
     async def fetch_due_reminders_with_lock(self, batch_size: int = 10) -> list[Reminder]:
-        """
-        Fetches due reminders using SELECT FOR UPDATE SKIP LOCKED.
-
-        RACE CONDITION FIX:
-        Called by the ARQ background worker — potentially multiple worker processes.
-        SKIP LOCKED means each worker gets a different set of reminders.
-        No two workers ever process the same reminder simultaneously.
-
-        We also set processing_locked_at immediately so crash recovery works:
-        A separate monitoring query can detect reminders locked for >5 minutes
-        and alert the team that a worker may have crashed mid-send.
-        """
         now = datetime.now(tz=timezone.utc)
         stale_lock_threshold = now - timedelta(minutes=5)
 
         result = await self.db.execute(
             select(Reminder)
             .where(
-                Reminder.is_active == True,
+                Reminder.is_active.is_(True),
                 Reminder.next_send_at <= now,
                 # Either not locked, or lock is stale (worker crashed >5 min ago)
-                (Reminder.processing_locked_at == None) |
+                (Reminder.processing_locked_at.is_(None)) |
                 (Reminder.processing_locked_at < stale_lock_threshold),
             )
             .limit(batch_size)
@@ -164,19 +135,6 @@ class ReminderService:
         return reminders
 
     async def mark_reminder_sent(self, reminder: Reminder) -> None:
-        """
-        Called FIRST after a notification is sent — before any other work.
-
-        WHY UPDATE last_sent_at IMMEDIATELY:
-        If the worker crashes after sending but before calling this,
-        the next worker picks up the reminder (lock released on crash)
-        and sends again — double notification.
-
-        By writing last_sent_at as the VERY FIRST thing after sending,
-        we minimise the window for double-sends.
-        The window is now: send → crash → pick up again, but last_sent_at is already set
-        → second worker checks it and skips. Near-zero double-sends.
-        """
         now = datetime.now(tz=timezone.utc)
         reminder.last_sent_at = now
         reminder.processing_locked_at = None  # Release the lock

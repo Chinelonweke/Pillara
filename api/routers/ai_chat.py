@@ -1,10 +1,4 @@
-# api/routers/ai_chat.py
-#
-# AI ENDPOINTS:
-# POST /ai/query        — text query to AI medication assistant
-# POST /ai/voice        — voice query (audio upload → transcribe → AI → TTS)
-# POST /ai/insights     — get personalised health insights for a profile
-
+import json
 import uuid
 from typing import Optional
 
@@ -20,8 +14,8 @@ from api.dependencies import (
 )
 from core.config import settings
 from core.exceptions import InvalidAudioError
-from core.security import sanitize_for_llm, strip_llm_output_html
-from schemas.all_schemas import AIQueryRequest, AIQueryResponse, VoiceQueryResponse
+from core.security import sanitize_for_llm
+from schemas.all_schemas import AIQueryRequest, AIQueryResponse, VoiceQueryResponse, SuccessResponse
 from monitoring.logger import get_logger
 
 logger = get_logger(__name__)
@@ -41,23 +35,13 @@ async def ai_query(
     db: DBSession,
     redis: RedisClient,
 ) -> AIQueryResponse:
-    """
-    Sends a text question to the AI medication assistant.
-
-    SECURITY:
-    - Input sanitized (prompt injection defense) in AIQueryRequest validator
-    - LLM output HTML-stripped in the RAG pipeline before reaching here
-    - Rate limited by user_id (LLM quota)
-    - Confidence gate: if no verified drug data found, returns safe fallback
-    - Audit logged in the service layer
-    """
     from ai.rag.pipeline import RAGPipeline
     from services.medication_service import MedicationService
     from monitoring.audit import AuditEventType, AuditLogger, AuditOutcome
 
     audit = AuditLogger(db=db)
 
-    # Fetch profile medications for context (if profile_id provided)
+    # Fetch profile medications for context
     profile_medication_names = []
     if body.profile_id:
         med_service = MedicationService(db=db)
@@ -68,21 +52,20 @@ async def ai_query(
                 request_id=request.state.request_id,
             )
             profile_medication_names = [m.name for m in medications if m.is_active]
-        except Exception:
-            pass  # If profile fetch fails, continue without context
+        except Exception as e:
+            logger.warning("medication_load_for_ai_failed", error=str(e))
 
-    # Fetch conversation history from Redis if conversation_id provided
+    # Fetch conversation history — slice at load time to prevent unbounded memory
     conversation_history = []
     conversation_id = body.conversation_id or str(uuid.uuid4())
     if body.conversation_id and redis:
         try:
-            import json
             history_key = f"conversation:{current_user.id}:{body.conversation_id}"
             history_json = await redis.get(history_key)
             if history_json:
-                conversation_history = json.loads(history_json)
-        except Exception:
-            pass
+                conversation_history = json.loads(history_json)[-10:]
+        except Exception as e:
+            logger.warning("conversation_history_load_failed", error=str(e))
 
     # Run the RAG pipeline
     pipeline = RAGPipeline(redis=redis)
@@ -94,16 +77,16 @@ async def ai_query(
         request_id=request.state.request_id,
     )
 
-    # Store updated conversation history in Redis (last 5 turns, TTL 1 hour)
-    if redis:
+    # Store updated conversation history in Redis (last 10 turns, TTL 1 hour)
+    # Skip off-topic rejections — they add no value to conversation context
+    if redis and result.query_intent != "off_topic":
         try:
-            import json
             conversation_history.append({"role": "user", "content": body.query})
             conversation_history.append({"role": "assistant", "content": result.response_text})
             history_key = f"conversation:{current_user.id}:{conversation_id}"
             await redis.setex(history_key, 3600, json.dumps(conversation_history[-10:]))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("conversation_history_save_failed", error=str(e))
 
     await audit.log(
         event_type=AuditEventType.AI_QUERY_MADE,
@@ -116,6 +99,13 @@ async def ai_query(
             "confidence_gate_passed": result.confidence_gate_passed,
             "provider": result.provider_used,
             "latency_ms": result.latency_ms,
+            "prompt_tokens": getattr(result, "prompt_tokens", 0),
+            "completion_tokens": getattr(result, "completion_tokens", 0),
+            "estimated_cost_usd": round(
+                (getattr(result, "prompt_tokens", 0) / 1_000_000 * 0.59) +
+                (getattr(result, "completion_tokens", 0) / 1_000_000 * 0.79),
+                6
+            ),
         },
     )
 
@@ -146,19 +136,7 @@ async def voice_query(
     profile_id: Optional[str] = Form(None),
     language: str = Form("en"),
 ) -> VoiceQueryResponse:
-    """
-    Accepts a voice recording, transcribes it with Whisper,
-    runs the AI pipeline, and returns both text and audio response.
-
-    SECURITY:
-    - File size validated (max 25MB)
-    - MIME type validated from file bytes (not filename extension)
-    - Audio saved to /tmp with UUID filename (no path traversal)
-    - Temp file deleted after processing
-    """
     import os
-    import tempfile
-
     from monitoring.audit import AuditEventType, AuditLogger, AuditOutcome
 
     audit = AuditLogger(db=db)
@@ -171,28 +149,22 @@ async def voice_query(
             f"Audio file too large. Maximum size is {settings.MAX_AUDIO_FILE_SIZE_MB}MB."
         )
 
-    # Validate MIME type from the actual file bytes (not the filename)
-    # python-magic reads the file header bytes — cannot be spoofed by renaming
-    allowed_audio_types = {
-        b"\xff\xfb": "mp3",      # MP3
-        b"\x49\x44\x33": "mp3",  # MP3 with ID3 tag
-        b"\x52\x49\x46\x46": "wav",  # WAV (RIFF header)
-        b"\x00\x00\x00": "m4a",  # M4A/MP4
-        b"\x1a\x45\xdf\xa3": "webm",  # WebM
-        b"\x4f\x67\x67\x53": "ogg",  # OGG
-    }
-
-    file_header = content[:4]
-    file_type_valid = any(content.startswith(sig) for sig in allowed_audio_types)
-    if not file_type_valid:
+    # Validate MIME type from actual file bytes — cannot be spoofed by renaming
+    allowed_audio_sigs = [
+        b"\xff\xfb",             # MP3
+        b"\x49\x44\x33",        # MP3 with ID3 tag
+        b"\x52\x49\x46\x46",    # WAV (RIFF header)
+        b"\x00\x00\x00",        # M4A/MP4
+        b"\x1a\x45\xdf\xa3",    # WebM
+        b"\x4f\x67\x67\x53",    # OGG
+    ]
+    if not any(content.startswith(sig) for sig in allowed_audio_sigs):
         raise InvalidAudioError("Invalid audio format. Supported: MP3, WAV, M4A, WebM, OGG.")
 
-    # Save to temp file with UUID name — never use the original filename
-    # Original filename could contain path traversal: "../../etc/passwd"
+    # Save to temp file with UUID name — never use original filename (path traversal risk)
     temp_dir = "/tmp/pillara_audio"
     os.makedirs(temp_dir, exist_ok=True)
-    temp_filename = f"{uuid.uuid4()}.audio"
-    temp_path = os.path.join(temp_dir, temp_filename)
+    temp_path = os.path.join(temp_dir, f"{uuid.uuid4()}.audio")
 
     try:
         with open(temp_path, "wb") as f:
@@ -209,7 +181,6 @@ async def voice_query(
         if not transcription or not transcription.strip():
             raise InvalidAudioError("Could not transcribe audio. Please speak clearly and try again.")
 
-        # Sanitize the transcription before sending to LLM
         clean_query = sanitize_for_llm(transcription)
 
         # Fetch profile medications
@@ -224,8 +195,8 @@ async def voice_query(
                     request_id=request.state.request_id,
                 )
                 profile_medication_names = [m.name for m in medications if m.is_active]
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("tts_fallback_failed", error=str(e))
 
         # Run RAG pipeline with voice formatting
         from ai.rag.pipeline import RAGPipeline
@@ -233,7 +204,7 @@ async def voice_query(
         result = await pipeline.query(
             user_query=clean_query,
             profile_medications=profile_medication_names,
-            is_voice=True,  # Formats response for TTS
+            is_voice=True,
             request_id=request.state.request_id,
         )
 
@@ -245,7 +216,6 @@ async def voice_query(
             audio_url = await tts.synthesize(text=result.response_text)
         except Exception as tts_error:
             logger.warning("tts_failed", error=str(tts_error))
-            # TTS failure is non-fatal — return text response without audio
 
         await audit.log(
             event_type=AuditEventType.VOICE_QUERY_MADE,
@@ -271,8 +241,38 @@ async def voice_query(
         )
 
     finally:
-        # Always delete the temp audio file — clean up PHI
+        # Always delete temp audio file — clean up PHI
         try:
             os.unlink(temp_path)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("temp_audio_cleanup_failed", error=str(e))
+
+
+@router.post(
+    "/feedback",
+    response_model=SuccessResponse,
+    summary="Submit feedback on an AI response",
+)
+async def submit_feedback(
+    body: dict,
+    current_user: CurrentUser,
+    db: DBSession,
+) -> SuccessResponse:
+    from monitoring.analytics import track
+
+    rating = body.get("rating", "unknown")
+    conversation_id = body.get("conversation_id", "unknown")
+
+    track("ai_feedback", user_id=str(current_user.id), properties={
+        "rating": rating,
+        "conversation_id": conversation_id,
+    })
+
+    logger.info(
+        "ai_feedback_received",
+        user_id=current_user.id,
+        rating=rating,
+        conversation_id=conversation_id,
+    )
+
+    return SuccessResponse(message="Feedback recorded. Thank you.")

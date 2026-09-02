@@ -1,0 +1,94 @@
+# .github/workflows/drug_data_pipeline.yml
+#
+# WHY THIS EXISTS:
+# Drug classifications change. New drugs get approved. Cross-reactivity
+# data gets updated as clinical evidence accumulates. A healthcare product
+# that seeds its knowledge base once and never updates it will eventually
+# give outdated answers. This workflow runs the drug class pipeline weekly,
+# keeping ChromaDB current with the latest RxNorm and MedRT data.
+#
+# SCHEDULE: Every Sunday at 02:00 UTC (low-traffic window)
+# TRIGGER: Also runs on manual dispatch (workflow_dispatch)
+#
+# WHAT IT DOES:
+# 1. Checks out the repo
+# 2. Sets up Python + installs dependencies
+# 3. Runs scripts/seed_drug_classes.py against the production ChromaDB
+# 4. Logs the result (classes processed, chunks upserted)
+#
+# SECRETS REQUIRED (set in GitHub repo Settings → Secrets):
+# - CHROMADB_HOST: production ChromaDB host
+# - CHROMADB_PORT: production ChromaDB port
+# - RXNORM_API_BASE_URL: https://rxnav.nlm.nih.gov/REST (no key needed)
+# - SENTRY_DSN: for error reporting if pipeline fails
+
+name: Drug Class Data Pipeline
+
+on:
+  schedule:
+    # Every Sunday at 02:00 UTC
+    - cron: '0 2 * * 0'
+
+  # Allow manual trigger from GitHub Actions UI
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (preview without writing to ChromaDB)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+
+jobs:
+  seed_drug_classes:
+    name: Seed drug class knowledge into ChromaDB
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run drug class pipeline
+        env:
+          # ChromaDB connection
+          CHROMADB_HOST: ${{ secrets.CHROMADB_HOST }}
+          CHROMADB_PORT: ${{ secrets.CHROMADB_PORT }}
+          # RxNorm — no API key needed, just the base URL
+          RXNORM_API_BASE_URL: https://rxnav.nlm.nih.gov/REST
+          RXNORM_API_TIMEOUT: "10"
+          # Sentry for pipeline error reporting
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          # App config
+          ENVIRONMENT: production
+          APP_VERSION: ${{ github.sha }}
+          # Suppress secrets loader warnings in CI
+          INFISICAL_TOKEN: "not-used-in-ci"
+        run: |
+          DRY_RUN_FLAG=""
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            DRY_RUN_FLAG="--dry-run"
+            echo "Running in DRY RUN mode — no data will be written"
+          fi
+          python scripts/seed_drug_classes.py $DRY_RUN_FLAG
+
+      - name: Report pipeline result
+        if: always()
+        run: |
+          echo "Pipeline job completed. Check logs above for:"
+          echo "  - Classes processed"
+          echo "  - Chunks upserted into ChromaDB"
+          echo "  - Any failures"

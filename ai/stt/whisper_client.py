@@ -1,7 +1,6 @@
 # ai/stt/whisper_client.py
 
 import asyncio
-import os
 from monitoring.logger import get_logger
 
 logger = get_logger(__name__)

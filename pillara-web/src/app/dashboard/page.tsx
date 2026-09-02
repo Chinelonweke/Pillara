@@ -417,7 +417,9 @@ export default function DashboardPage() {
         setChatMessages([])
       }
     } catch (err) {
-      console.error('Failed to switch profile:', err)
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error('Failed to switch profile:', msg)
+      alert('Failed to switch profile. Please try again.')
     } finally {
       setLoadingData(false)
     }
@@ -590,7 +592,7 @@ export default function DashboardPage() {
                     ))}
                     <div className="border-t border-[var(--border)] px-3 py-2">
                       <Link
-                        href="/onboarding"
+                        href="/onboarding?new=true"
                         className="flex items-center gap-2 text-[var(--muted)] hover:text-[var(--foreground)] text-sm transition-colors"
                         onClick={() => setShowProfileSwitcher(false)}
                       >

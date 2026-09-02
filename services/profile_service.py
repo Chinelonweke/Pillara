@@ -48,7 +48,11 @@ class ProfileService:
             user_id=user_id,
             name=sanitize_text_input(profile_data.name, max_length=100),
             relationship_to_user=profile_data.relationship_to_user,
-            date_of_birth=profile_data.date_of_birth,
+            date_of_birth=(
+                profile_data.date_of_birth.replace(tzinfo=__import__('datetime').timezone.utc)
+                if profile_data.date_of_birth and profile_data.date_of_birth.tzinfo is None
+                else profile_data.date_of_birth
+            ),
             gender=profile_data.gender,
             weight_kg=profile_data.weight_kg,
             known_allergies=sanitize_text_input(profile_data.known_allergies or "", max_length=500) or None,

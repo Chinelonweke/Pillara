@@ -807,9 +807,9 @@ export default function DashboardPage() {
                       .map((block: string, i: number) => {
                         const isHighRisk = block.toLowerCase().includes('risk: high') || block.toLowerCase().includes('severity: high')
                         const isModerate = block.toLowerCase().includes('risk: moderate') || block.toLowerCase().includes('severity: moderate')
-                        const isSafe = block.toLowerCase().includes('risk: safe') || block.toLowerCase().includes('no known interaction')
-                        const borderColor = isHighRisk ? '#FCA5A5' : isModerate ? '#FCD34D' : isSafe ? '#86EFAC' : 'var(--border)'
-                        const bgColor = isHighRisk ? '#FFF5F5' : isModerate ? '#FFFBEB' : isSafe ? '#F0FDF4' : 'transparent'
+                        const isSafe = block.toLowerCase().includes('risk: unknown') || block.toLowerCase().includes('no known interaction')
+                        const borderColor = isHighRisk ? '#FCA5A5' : isModerate ? '#FCD34D' : isSafe ? '#BFDBFE' : 'var(--border)'
+                        const bgColor = isHighRisk ? '#FFF5F5' : isModerate ? '#FFFBEB' : isSafe ? '#EFF6FF' : 'transparent'
                         return (
                           <div key={i} className="p-3 rounded-xl text-sm leading-relaxed"
                             style={{border: `1px solid ${borderColor}`, background: bgColor, color: 'var(--foreground)'}}>

@@ -83,7 +83,7 @@ from api.middleware import RequestContextMiddleware, SecurityHeadersMiddleware
 # depend on anything else having run first.
 #
 # BUG THIS FIXES: both of these classes were fully written in api/middleware.py
-# but never actually registered with app.add_middleware() — they existed in the
+# but never actually registered with app.add_middleware(RequestContextMiddleware)dleware() — they existed in the
 # codebase but never ran. This caused AttributeError: 'State' object has no
 # attribute 'ip_hash' the first time any endpoint depending on it was called
 # (e.g. POST /api/v1/auth/register).

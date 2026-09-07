@@ -382,7 +382,41 @@ async def delete_account(
     )
     await db.commit()
 
-    # Hard delete — cascade removes profiles, medications, reminders, sessions
+    # NDPR right to erasure — explicit deletion strategy:
+    #
+    # 1. Profiles this user OWNS (owner_user_id == user_id or self-created with no owner):
+    #    Delete them entirely — all their medications, reminders, and data cascade-delete.
+    #
+    # 2. Profiles this user CREATED but someone else has claimed (owner_user_id != user_id):
+    #    NULL out user_id only — the profile belongs to the patient who claimed it.
+    #    Their data is not erased. Their ownership is preserved.
+    #
+    # 3. Profiles shared WITH this user via ProfileAccess:
+    #    The DB cascade on ProfileAccess will clean these up when the user is deleted.
+
+    # Step 1: Delete profiles this user fully owns
+    await db.execute(text(
+        """
+        DELETE FROM profiles
+        WHERE (owner_user_id = :id)
+           OR (user_id = :id AND owner_user_id IS NULL)
+        """
+    ), {"id": user_id})
+
+    # Step 2: NULL out creator reference on profiles claimed by another patient
+    await db.execute(text(
+        """
+        UPDATE profiles
+        SET user_id = NULL
+        WHERE user_id = :id
+          AND owner_user_id IS NOT NULL
+          AND owner_user_id != :id
+        """
+    ), {"id": user_id})
+
+    await db.commit()
+
+    # Step 3: Delete the user — cascades remove sessions, ProfileAccess grants, audit refs
     await db.execute(text("DELETE FROM users WHERE id = :id"), {"id": user_id})
     await db.commit()
 

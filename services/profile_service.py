@@ -1,7 +1,7 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.exceptions import AuthorizationError, ProfileNotFoundError
+from core.exceptions import ProfileNotFoundError
 from models.user import Profile
 from monitoring.audit import AuditEventType, AuditLogger, AuditOutcome
 from monitoring.logger import get_logger
@@ -25,8 +25,17 @@ class ProfileService:
         return list(result.scalars().all())
 
     async def get_profile(self, profile_id: str, user_id: str, request_id: str = "unknown") -> Profile:
+        """
+        Role-aware: allows owners, caregivers, and viewers to fetch a profile.
+        Checks all three access routes: user_id, owner_user_id, ProfileAccess.
+        """
+        from services.sharing_service import SharingService
+        sharing = SharingService(db=self.db)
+        role = await sharing.get_user_role_for_profile(profile_id=profile_id, user_id=user_id)
+        if not role:
+            raise ProfileNotFoundError(profile_id=profile_id)
         result = await self.db.execute(
-            select(Profile).where(Profile.id == profile_id, Profile.user_id == user_id)
+            select(Profile).where(Profile.id == profile_id)
         )
         profile = result.scalar_one_or_none()
         if not profile:
@@ -75,8 +84,16 @@ class ProfileService:
 
     async def update_profile(self, profile_id: str, user_id: str, update_data: ProfileUpdate, request_id: str = "unknown") -> Profile:
         from core.security import sanitize_text_input
+        from services.sharing_service import SharingService
 
         profile = await self.get_profile(profile_id=profile_id, user_id=user_id, request_id=request_id)
+        # Viewers cannot update profile data — caregiver minimum required
+        role = await SharingService(db=self.db).get_user_role_for_profile(
+            profile_id=profile_id, user_id=user_id
+        )
+        if not role or role == "viewer":
+            from core.exceptions import AuthorizationError
+            raise AuthorizationError("Viewers cannot update profile data.")
         updates = update_data.model_dump(exclude_unset=True)
 
         for forbidden_field in ("id", "user_id", "is_primary", "created_at"):
@@ -105,7 +122,16 @@ class ProfileService:
         return profile
 
     async def delete_profile(self, profile_id: str, user_id: str, request_id: str = "unknown") -> None:
+        from services.sharing_service import SharingService
+
         profile = await self.get_profile(profile_id=profile_id, user_id=user_id, request_id=request_id)
+        # Only owners can delete profiles
+        role = await SharingService(db=self.db).get_user_role_for_profile(
+            profile_id=profile_id, user_id=user_id
+        )
+        if role != "owner":
+            from core.exceptions import AuthorizationError
+            raise AuthorizationError("Only the profile owner can delete a profile.")
 
         if profile.is_primary:
             raise AuthorizationError("Cannot delete your primary profile. Create another profile first.")

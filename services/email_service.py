@@ -270,7 +270,7 @@ async def send_reminder_email(to_email: str, medication_name: str, dosage: str, 
                 footer_note="You are receiving this because you set up a medication reminder on Pillara.",
             ),
         })
-        logger.info("reminder_email_sent", medication=medication_name)
+        logger.info("reminder_email_sent")  # medication name omitted from log — PHI
         return True
     except Exception as error:
         logger.error("reminder_email_failed", error=str(error))

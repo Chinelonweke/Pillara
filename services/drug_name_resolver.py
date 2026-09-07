@@ -128,7 +128,7 @@ async def resolve_to_generic(drug_name: str, redis=None) -> str:
             return generic_name
 
     except Exception as error:
-        logger.warning("rxnorm_lookup_failed", drug=drug_name, error=str(error))
+        logger.warning("rxnorm_lookup_failed", error=str(error))  # drug name omitted — PHI
 
     # Step 1 + Step 2 both failed — return original name
     # Post-launch: integrate DrugBank Open Data (free, register at go.drugbank.com)

@@ -52,7 +52,7 @@ async def check_interactions(
         try:
             cached = await redis.get(cache_key)
             if cached:
-                logger.info("interaction_cache_hit", drugs=sanitized_drugs)
+                logger.info("interaction_cache_hit", drug_count=len(sanitized_drugs))  # drug names omitted — PHI
                 return InteractionCheckResponse(**json.loads(cached))
         except Exception as cache_error:
             logger.debug("interaction_cache_read_failed", error=str(cache_error))
@@ -115,7 +115,7 @@ async def check_interactions(
         logger.warning(
             "interaction_check_allergy_warnings_found",
             warning_count=len(allergy_warnings),
-            drugs=all_drugs,
+            drug_count=len(all_drugs),  # drug names omitted — PHI
             request_id=request_id,
         )
 

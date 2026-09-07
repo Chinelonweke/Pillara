@@ -23,7 +23,8 @@ function LoginContent() {
       await login(email, password)
       // Preserve same-origin redirect from invite/claim flows
       const redirect = searchParams.get('redirect')
-      if (redirect && redirect.startsWith('/')) {
+      // Same-origin only: must start with / but NOT // (protocol-relative open redirect)
+      if (redirect && redirect.startsWith('/') && !redirect.startsWith('//')) {
         router.push(redirect)
       } else {
         router.push('/dashboard')

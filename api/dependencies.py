@@ -160,7 +160,13 @@ async def rate_limit_auth(
     trusted_proxy = getattr(settings, 'TRUSTED_PROXY_IPS', None)
     client_ip = request.client.host if request.client else "unknown"
 
-    if x_forwarded_for and (not trusted_proxy or client_ip in trusted_proxy.split(",")):
+    # Only trust X-Forwarded-For when the request comes from a configured trusted proxy.
+    # IMPORTANT: if trusted_proxy is empty/unset, we do NOT trust the header —
+    # fail closed (use client IP directly) to prevent IP spoofing.
+    # Old logic (not trusted_proxy OR client_ip in list) was backwards:
+    # an unset TRUSTED_PROXY_IPS would mean "trust everyone" — the opposite of safe.
+    trusted_ips = [ip.strip() for ip in trusted_proxy.split(",")] if trusted_proxy else []
+    if x_forwarded_for and client_ip in trusted_ips:
         raw_ip = x_forwarded_for.split(",")[0].strip()
     else:
         raw_ip = client_ip

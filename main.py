@@ -2,7 +2,7 @@
 import asyncio
 from contextlib import asynccontextmanager
 from api.routers import auth, medications, interactions, ai_chat, reminders, profiles, reports, sharing, notifications
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from api.middleware import RequestContextMiddleware, SecurityHeadersMiddleware
@@ -140,6 +140,12 @@ async def unhandled_exception_handler(request: Request, error: Exception) -> JSO
         method=request.method,
         traceback=traceback.format_exc(),
     )
+    try:
+        import sentry_sdk
+        sentry_sdk.capture_exception(error)
+    except Exception:
+        pass
+
     return JSONResponse(
         status_code=500,
         content={
@@ -149,25 +155,10 @@ async def unhandled_exception_handler(request: Request, error: Exception) -> JSO
     )
 
 
-@app.exception_handler(Exception)
-async def generic_error_handler(request: Request, error: Exception) -> JSONResponse:
-    logger.error(
-        "unhandled_exception",
-        error=str(error),
-        error_type=type(error).__name__,
-        path=request.url.path,
-        method=request.method,
-    )
-    try:
-        import sentry_sdk
-        sentry_sdk.capture_exception(error)
-    except Exception:
-        pass
-
-    return JSONResponse(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={"error": "internal_error", "message": "An unexpected error occurred. Our team has been notified."},
-    )
+# NOTE: Only one @app.exception_handler(Exception) is registered above.
+# FastAPI stores handlers in a dict keyed by exception type — a second registration
+# silently overwrites the first. The handler above (unhandled_exception_handler)
+# is the single authoritative handler: CRITICAL log + traceback + Sentry capture.
 
 
 @app.get("/health", tags=["Health"])

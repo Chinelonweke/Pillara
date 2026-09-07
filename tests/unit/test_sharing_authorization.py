@@ -1,212 +1,461 @@
 """
 Unit tests for sharing authorization boundary.
-Tests the role resolution logic in SharingService without hitting a real database.
+Tests call actual SharingService methods with properly mocked async DB.
 """
+from unittest.mock import AsyncMock, MagicMock
+from datetime import datetime, timezone
+import pytest
 
 
-class MockProfile:
-    def __init__(self, user_id, owner_user_id=None, status="active"):
-        self.id = "profile-123"
-        self.user_id = user_id
-        self.owner_user_id = owner_user_id
-        self.status = status
+# ── Mock helpers ──────────────────────────────────────────────────────────────
+
+def make_db_mock(*return_values):
+    """
+    Create an AsyncMock db where each execute() call returns the next value
+    in return_values via scalar_one_or_none().
+    """
+    db = AsyncMock()
+    results = []
+    for val in return_values:
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = val
+        results.append(result)
+
+    if len(results) == 1:
+        db.execute.return_value = results[0]
+    else:
+        db.execute.side_effect = results
+
+    return db
 
 
-class MockProfileAccess:
-    def __init__(self, role, status="active"):
-        self.role = role
-        self.status = status
-        self.granted_to_user_id = "user-caregiver"
-        self.profile_id = "profile-123"
+def make_profile(user_id, owner_user_id=None, status="active"):
+    p = MagicMock()
+    p.id = "profile-123"
+    p.user_id = user_id
+    p.owner_user_id = owner_user_id
+    p.status = status
+    p.claim_email = None
+    p.claim_token = None
+    p.claim_token_expires = datetime(2099, 1, 1, tzinfo=timezone.utc)
+    return p
 
 
-# ── Email verification tests ────────────────────────────────────────────────
+def make_access(role, granted_to_user_id=None, invite_email="nurse@hospital.com"):
+    a = MagicMock()
+    a.role = role
+    a.status = "pending"
+    a.granted_to_user_id = granted_to_user_id
+    a.profile_id = "profile-123"
+    a.invite_email = invite_email
+    a.invite_token = "token-abc"
+    a.invite_token_expires = datetime(2099, 1, 1, tzinfo=timezone.utc)
+    return a
+
+
+# ── Invite email verification ─────────────────────────────────────────────────
 
 class TestInviteEmailVerification:
-    """Invite acceptance must verify email matches intended recipient."""
 
-    def test_invite_email_mismatch_raises(self):
-        """A user with a different email must not be able to accept an invite."""
+    @pytest.mark.asyncio
+    async def test_wrong_email_is_rejected(self):
+        from core.exceptions import AuthorizationError
+        from services.sharing_service import SharingService
 
-        invite_email = "nurse@hospital.com"
-        accepting_email = "attacker@evil.com"
+        access = make_access("caregiver", invite_email="nurse@hospital.com")
+        db = make_db_mock(access)
 
-        # This is the check that must happen in accept_invite
-        if invite_email and accepting_email.lower().strip() != invite_email.lower().strip():
-            error_raised = True
-        else:
-            error_raised = False
+        svc = SharingService(db=db)
+        svc.audit = AsyncMock()
 
-        assert error_raised, "Email mismatch should raise an error"
+        with pytest.raises(AuthorizationError, match="different email"):
+            await svc.accept_invite(
+                invite_token="token-abc",
+                accepting_user_id="user-attacker",
+                accepting_user_email="attacker@evil.com",
+            )
 
-    def test_invite_email_match_passes(self):
-        """The intended recipient must be able to accept the invite."""
-        invite_email = "nurse@hospital.com"
-        accepting_email = "nurse@hospital.com"
+    @pytest.mark.asyncio
+    async def test_correct_email_is_accepted(self):
+        from services.sharing_service import SharingService
 
-        mismatch = invite_email and accepting_email.lower().strip() != invite_email.lower().strip()
-        assert not mismatch, "Matching email should not raise an error"
+        access = make_access("caregiver", invite_email="nurse@hospital.com")
+        db = make_db_mock(access)
 
-    def test_invite_email_case_insensitive(self):
-        """Email comparison must be case-insensitive."""
-        invite_email = "Nurse@Hospital.COM"
-        accepting_email = "nurse@hospital.com"
+        svc = SharingService(db=db)
+        svc.audit = AsyncMock()
+        svc.audit.log = AsyncMock()
 
-        mismatch = invite_email and accepting_email.lower().strip() != invite_email.lower().strip()
-        assert not mismatch, "Case-insensitive email match should pass"
+        result = await svc.accept_invite(
+            invite_token="token-abc",
+            accepting_user_id="user-nurse",
+            accepting_user_email="nurse@hospital.com",
+        )
+        assert result.granted_to_user_id == "user-nurse"
+        assert result.status == "active"
 
+    @pytest.mark.asyncio
+    async def test_email_comparison_is_case_insensitive(self):
+        from services.sharing_service import SharingService
+
+        access = make_access("caregiver", invite_email="Nurse@Hospital.COM")
+        db = make_db_mock(access)
+
+        svc = SharingService(db=db)
+        svc.audit = AsyncMock()
+        svc.audit.log = AsyncMock()
+
+        result = await svc.accept_invite(
+            invite_token="token-abc",
+            accepting_user_id="user-nurse",
+            accepting_user_email="nurse@hospital.com",
+        )
+        assert result.status == "active"
+
+    @pytest.mark.asyncio
+    async def test_token_not_consumed_on_wrong_email(self):
+        """Token must NOT be consumed when the wrong user tries to accept."""
+        from core.exceptions import AuthorizationError
+        from services.sharing_service import SharingService
+
+        access = make_access("caregiver", invite_email="nurse@hospital.com")
+        original_token = access.invite_token
+        db = make_db_mock(access)
+
+        svc = SharingService(db=db)
+        svc.audit = AsyncMock()
+
+        with pytest.raises(AuthorizationError):
+            await svc.accept_invite(
+                invite_token="token-abc",
+                accepting_user_id="user-attacker",
+                accepting_user_email="attacker@evil.com",
+            )
+
+        assert access.invite_token == original_token
+        assert access.status == "pending"
+
+
+# ── Claim email verification ──────────────────────────────────────────────────
 
 class TestClaimEmailVerification:
-    """Claim token acceptance must verify email matches intended recipient."""
 
-    def test_claim_email_mismatch_raises(self):
-        """A user with a different email must not be able to claim a profile."""
-        claim_email = "patient@gmail.com"
-        claiming_email = "attacker@evil.com"
+    @pytest.mark.asyncio
+    async def test_wrong_email_is_rejected(self):
+        from core.exceptions import AuthorizationError
+        from services.sharing_service import SharingService
 
-        mismatch = claim_email and claiming_email.lower().strip() != claim_email.lower().strip()
-        assert mismatch, "Email mismatch should raise an error"
+        profile = make_profile(user_id="user-caregiver", status="unclaimed")
+        profile.claim_email = "patient@gmail.com"
+        profile.claim_token = "claim-token"
+        db = make_db_mock(profile)
 
-    def test_claim_email_match_passes(self):
-        """The intended patient must be able to claim the profile."""
-        claim_email = "patient@gmail.com"
-        claiming_email = "patient@gmail.com"
+        svc = SharingService(db=db)
+        svc.audit = AsyncMock()
 
-        mismatch = claim_email and claiming_email.lower().strip() != claim_email.lower().strip()
-        assert not mismatch, "Matching email should pass"
+        with pytest.raises(AuthorizationError, match="different email"):
+            await svc.claim_profile(
+                claim_token="claim-token",
+                claiming_user_id="user-attacker",
+                claiming_user_email="attacker@evil.com",
+            )
+
+    @pytest.mark.asyncio
+    async def test_correct_email_is_accepted(self):
+        from services.sharing_service import SharingService
+
+        profile = make_profile(user_id="user-caregiver", status="unclaimed")
+        profile.claim_email = "patient@gmail.com"
+        profile.claim_token = "claim-token"
+        db = make_db_mock(profile)
+        db.add = MagicMock()
+
+        svc = SharingService(db=db)
+        svc.audit = AsyncMock()
+        svc.audit.log = AsyncMock()
+
+        result = await svc.claim_profile(
+            claim_token="claim-token",
+            claiming_user_id="user-patient",
+            claiming_user_email="patient@gmail.com",
+        )
+        assert result.owner_user_id == "user-patient"
+        assert result.status == "active"
 
 
-# ── Role resolution tests ────────────────────────────────────────────────────
+# ── Role resolution ───────────────────────────────────────────────────────────
 
 class TestRoleResolution:
-    """Role resolution logic for different profile ownership scenarios."""
 
-    def test_creator_of_unclaimed_profile_is_owner(self):
-        """A user who created an unclaimed profile is the owner."""
-        profile = MockProfile(user_id="user-1", owner_user_id=None, status="unclaimed")
-        user_id = "user-1"
+    @pytest.mark.asyncio
+    async def test_creator_of_unclaimed_profile_is_owner(self):
+        from services.sharing_service import SharingService
 
-        # Logic from SharingService.get_user_role_for_profile
-        if profile.user_id == user_id and profile.status == "unclaimed":
-            role = "owner"
-        else:
-            role = None
+        profile = make_profile(user_id="user-1", owner_user_id=None, status="unclaimed")
+        db = make_db_mock(profile)
 
+        svc = SharingService(db=db)
+        role = await svc.get_user_role_for_profile("profile-123", "user-1")
         assert role == "owner"
 
-    def test_owner_user_id_match_is_owner(self):
-        """A user whose ID matches owner_user_id is the owner."""
-        profile = MockProfile(user_id="user-caregiver", owner_user_id="user-patient", status="active")
-        user_id = "user-patient"
+    @pytest.mark.asyncio
+    async def test_owner_user_id_match_is_owner(self):
+        from services.sharing_service import SharingService
 
-        if profile.owner_user_id == user_id:
-            role = "owner"
-        else:
-            role = None
+        profile = make_profile(user_id="user-caregiver", owner_user_id="user-patient")
+        db = make_db_mock(profile, None)  # second call: no ProfileAccess
 
+        svc = SharingService(db=db)
+        role = await svc.get_user_role_for_profile("profile-123", "user-patient")
         assert role == "owner"
 
-    def test_creator_after_claim_is_caregiver(self):
-        """The original creator becomes caregiver after patient claims the profile."""
-        profile = MockProfile(user_id="user-caregiver", owner_user_id="user-patient", status="active")
-        user_id = "user-caregiver"
+    @pytest.mark.asyncio
+    async def test_creator_after_claim_is_caregiver(self):
+        from services.sharing_service import SharingService
 
-        if profile.owner_user_id == user_id:
-            role = "owner"
-        elif profile.user_id == user_id and profile.owner_user_id is None:
-            role = "owner"
-        elif (profile.user_id == user_id and profile.status == "active"
-              and profile.owner_user_id is not None
-              and profile.owner_user_id != user_id):
-            role = "caregiver"
-        else:
-            role = None
+        profile = make_profile(user_id="user-caregiver", owner_user_id="user-patient")
+        db = make_db_mock(profile, None)
 
-        assert role == "caregiver", "Original creator should be caregiver after claim"
+        svc = SharingService(db=db)
+        role = await svc.get_user_role_for_profile("profile-123", "user-caregiver")
+        assert role == "caregiver"
 
-    def test_creator_with_no_owner_is_owner(self):
-        """Creator of active profile with no owner_user_id is the owner (self-created profile)."""
-        profile = MockProfile(user_id="user-1", owner_user_id=None, status="active")
-        user_id = "user-1"
+    @pytest.mark.asyncio
+    async def test_creator_with_no_owner_is_owner(self):
+        from services.sharing_service import SharingService
 
-        if profile.owner_user_id == user_id:
-            role = "owner"
-        elif profile.user_id == user_id and profile.owner_user_id is None:
-            role = "owner"
-        else:
-            role = None
+        profile = make_profile(user_id="user-1", owner_user_id=None, status="active")
+        db = make_db_mock(profile)
 
+        svc = SharingService(db=db)
+        role = await svc.get_user_role_for_profile("profile-123", "user-1")
         assert role == "owner"
 
-    def test_unrelated_user_has_no_role(self):
-        """A user with no relation to the profile has no role."""
-        profile = MockProfile(user_id="user-caregiver", owner_user_id="user-patient", status="active")
-        user_id = "user-stranger"
+    @pytest.mark.asyncio
+    async def test_unrelated_user_has_no_role(self):
+        from services.sharing_service import SharingService
 
-        if profile.owner_user_id == user_id:
-            role = "owner"
-        elif profile.user_id == user_id and profile.owner_user_id is None:
-            role = "owner"
-        elif (profile.user_id == user_id and profile.status == "active"
-              and profile.owner_user_id is not None):
-            role = "caregiver"
-        else:
-            role = None  # Would check ProfileAccess next, but no access granted
+        profile = make_profile(user_id="user-caregiver", owner_user_id="user-patient")
+        db = make_db_mock(profile, None)  # no ProfileAccess for stranger
 
+        svc = SharingService(db=db)
+        role = await svc.get_user_role_for_profile("profile-123", "user-stranger")
         assert role is None
 
+    @pytest.mark.asyncio
+    async def test_profile_access_grant_returns_granted_role(self):
+        from services.sharing_service import SharingService
 
-# ── Login redirect tests ─────────────────────────────────────────────────────
+        profile = make_profile(user_id="user-caregiver", owner_user_id="user-patient")
+        access = make_access("viewer", granted_to_user_id="user-viewer")
+        db = make_db_mock(profile, access)
+
+        svc = SharingService(db=db)
+        role = await svc.get_user_role_for_profile("profile-123", "user-viewer")
+        assert role == "viewer"
+
+    @pytest.mark.asyncio
+    async def test_caregiver_profile_access_grant_returns_caregiver_role(self):
+        from services.sharing_service import SharingService
+
+        profile = make_profile(user_id="user-creator", owner_user_id="user-patient")
+        access = make_access("caregiver", granted_to_user_id="user-nurse")
+        db = make_db_mock(profile, access)
+
+        svc = SharingService(db=db)
+        role = await svc.get_user_role_for_profile("profile-123", "user-nurse")
+        assert role == "caregiver"
+
+
+# ── Login redirect validation ─────────────────────────────────────────────────
 
 class TestLoginRedirect:
-    """Login redirect must only allow same-origin redirects."""
+
+    def _is_valid(self, redirect):
+        return bool(redirect and redirect.startswith('/') and not redirect.startswith('//'))
 
     def test_same_origin_redirect_allowed(self):
-        """A path starting with / is a valid same-origin redirect."""
-        redirect = "/accept-invite?token=abc123"
-        valid = redirect and redirect.startswith('/')
-        assert valid
+        assert self._is_valid("/accept-invite?token=abc123")
 
     def test_external_redirect_blocked(self):
-        """An external URL must not be used as a redirect target."""
-        redirect = "https://evil.com/steal-token"
-        valid = redirect and redirect.startswith('/')
-        assert not valid
+        assert not self._is_valid("https://evil.com/steal-token")
 
     def test_protocol_relative_redirect_blocked(self):
-        """A protocol-relative URL must not be used as a redirect target."""
-        redirect = "//evil.com/steal-token"
-        valid = redirect and redirect.startswith('/') and not redirect.startswith('//')
-        assert not valid
+        assert not self._is_valid("//evil.com/steal-token")
 
     def test_empty_redirect_falls_back_to_dashboard(self):
-        """Empty redirect falls back to dashboard."""
         redirect = None
-        destination = redirect if (redirect and redirect.startswith('/')) else '/dashboard'
+        destination = redirect if self._is_valid(redirect) else '/dashboard'
         assert destination == '/dashboard'
 
 
-# ── Rate limit tests ─────────────────────────────────────────────────────────
+# ── Rate limit key independence ───────────────────────────────────────────────
 
 class TestRateLimitIdentifiers:
-    """Separate per-IP and per-email rate limits cannot be bypassed by rotating one."""
 
-    def test_per_ip_limit_separate_from_per_email(self):
-        """IP and email limits are separate keys — rotating one does not reset the other."""
+    def test_per_ip_and_per_email_are_independent_keys(self):
         import hashlib
 
         ip1 = hashlib.sha256("1.2.3.4".encode()).hexdigest()[:16]
         ip2 = hashlib.sha256("5.6.7.8".encode()).hexdigest()[:16]
         email = hashlib.sha256("victim@gmail.com".encode()).hexdigest()[:16]
 
-        ip1_key = f"ip:{ip1}"
-        ip2_key = f"ip:{ip2}"
+        assert f"ip:{ip1}" != f"ip:{ip2}"
+        assert f"email:{email}" != f"ip:{ip1}"
+        assert f"email:{email}" != f"ip:{ip2}"
+
+    def test_rotating_ip_does_not_reset_email_limit(self):
+        import hashlib
+
+        email = hashlib.sha256("victim@gmail.com".encode()).hexdigest()[:16]
         email_key = f"email:{email}"
 
-        # Different IPs have different IP keys
-        assert ip1_key != ip2_key
-        # Email key is independent of IP key
-        assert email_key != ip1_key
-        assert email_key != ip2_key
-        # Rotating IP does not change email key — email limit still applies
-        assert email_key == f"email:{email}"
+        for ip in ["1.2.3.4", "5.6.7.8", "9.10.11.12"]:
+            ip_hash = hashlib.sha256(ip.encode()).hexdigest()[:16]
+            assert f"ip:{ip_hash}" != email_key
+
+
+# ── Additional tests flagged in review ────────────────────────────────────────
+
+class TestClaimTokenNotConsumedOnWrongEmail:
+    """Claim token must NOT be consumed when wrong user tries to claim."""
+
+    @pytest.mark.asyncio
+    async def test_claim_token_not_consumed_on_wrong_email(self):
+        from core.exceptions import AuthorizationError
+        from services.sharing_service import SharingService
+
+        profile = make_profile(user_id="user-caregiver", status="unclaimed")
+        profile.claim_email = "patient@gmail.com"
+        profile.claim_token = "claim-token-original"
+        db = make_db_mock(profile)
+
+        svc = SharingService(db=db)
+        svc.audit = AsyncMock()
+
+        with pytest.raises(AuthorizationError):
+            await svc.claim_profile(
+                claim_token="claim-token-original",
+                claiming_user_id="user-attacker",
+                claiming_user_email="attacker@evil.com",
+            )
+
+        # Token and status must be unchanged
+        assert profile.claim_token == "claim-token-original"
+        assert profile.status == "unclaimed"
+        assert profile.owner_user_id is None
+
+
+class TestClaimEmailCaseInsensitive:
+    """Claim email comparison must be case-insensitive."""
+
+    @pytest.mark.asyncio
+    async def test_claim_email_case_insensitive(self):
+        from services.sharing_service import SharingService
+
+        profile = make_profile(user_id="user-caregiver", status="unclaimed")
+        profile.claim_email = "Patient@Gmail.COM"
+        profile.claim_token = "claim-token"
+        db = make_db_mock(profile)
+        db.add = MagicMock()
+
+        svc = SharingService(db=db)
+        svc.audit = AsyncMock()
+        svc.audit.log = AsyncMock()
+
+        result = await svc.claim_profile(
+            claim_token="claim-token",
+            claiming_user_id="user-patient",
+            claiming_user_email="patient@gmail.com",
+        )
+        assert result.owner_user_id == "user-patient"
+
+
+class TestOwnerOnlyActions:
+    """Caregiver and viewer must be blocked from owner-only actions."""
+
+    @pytest.mark.asyncio
+    async def test_caregiver_cannot_invite_others(self):
+        from core.exceptions import AuthorizationError
+        from services.sharing_service import SharingService
+
+        # Profile where user-caregiver is the caregiver, not owner
+        profile = make_profile(user_id="user-caregiver", owner_user_id="user-patient")
+        access_grant = make_access("caregiver", granted_to_user_id="user-caregiver")
+
+        db = make_db_mock(profile, access_grant)
+
+        svc = SharingService(db=db)
+        svc.audit = AsyncMock()
+
+        with pytest.raises(AuthorizationError):
+            await svc.require_role(
+                profile_id="profile-123",
+                user_id="user-caregiver",
+                minimum_role="owner",
+            )
+
+    @pytest.mark.asyncio
+    async def test_viewer_cannot_invite_others(self):
+        from core.exceptions import AuthorizationError
+        from services.sharing_service import SharingService
+
+        profile = make_profile(user_id="user-caregiver", owner_user_id="user-patient")
+        access_grant = make_access("viewer", granted_to_user_id="user-viewer")
+
+        db = make_db_mock(profile, access_grant)
+
+        svc = SharingService(db=db)
+        svc.audit = AsyncMock()
+
+        with pytest.raises(AuthorizationError):
+            await svc.require_role(
+                profile_id="profile-123",
+                user_id="user-viewer",
+                minimum_role="owner",
+            )
+
+
+class TestExpiredTokens:
+    """Expired invite and claim tokens must be rejected."""
+
+    @pytest.mark.asyncio
+    async def test_expired_invite_token_rejected(self):
+        from core.exceptions import ValidationError
+        from services.sharing_service import SharingService
+
+        access = make_access("caregiver", invite_email="nurse@hospital.com")
+        # Set token as expired
+        access.invite_token_expires = datetime(2020, 1, 1, tzinfo=timezone.utc)
+        db = make_db_mock(access)
+
+        svc = SharingService(db=db)
+        svc.audit = AsyncMock()
+
+        with pytest.raises(ValidationError, match="expired"):
+            await svc.accept_invite(
+                invite_token="token-abc",
+                accepting_user_id="user-nurse",
+                accepting_user_email="nurse@hospital.com",
+            )
+
+    @pytest.mark.asyncio
+    async def test_expired_claim_token_rejected(self):
+        from core.exceptions import ValidationError
+        from services.sharing_service import SharingService
+
+        profile = make_profile(user_id="user-caregiver", status="unclaimed")
+        profile.claim_email = "patient@gmail.com"
+        profile.claim_token = "claim-token"
+        profile.claim_token_expires = datetime(2020, 1, 1, tzinfo=timezone.utc)
+        db = make_db_mock(profile)
+
+        svc = SharingService(db=db)
+        svc.audit = AsyncMock()
+
+        with pytest.raises(ValidationError, match="expired"):
+            await svc.claim_profile(
+                claim_token="claim-token",
+                claiming_user_id="user-patient",
+                claiming_user_email="patient@gmail.com",
+            )

@@ -4,7 +4,7 @@ import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select, and_
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.exceptions import AuthorizationError, ProfileNotFoundError, ValidationError
@@ -85,14 +85,24 @@ class SharingService:
         return actual_role
 
     async def list_all_accessible_profiles(self, user_id: str) -> list[dict]:
-        # Own profiles
+        # Own profiles — user created it OR user is the owner via owner_user_id
+        # (claimed profiles: user_id = original creator, owner_user_id = patient)
         own_result = await self.db.execute(
-            select(Profile).where(Profile.user_id == user_id)
+            select(Profile).where(
+                or_(
+                    Profile.user_id == user_id,
+                    Profile.owner_user_id == user_id,
+                )
+            )
             .order_by(Profile.is_primary.desc(), Profile.created_at.asc())
         )
         own_profiles = list(own_result.scalars().all())
 
-        # Profiles shared with this user
+        # Profiles shared with this user via explicit ProfileAccess grant.
+        # Exclude profiles already captured in own_profiles using NOT IN rather than
+        # != comparisons — != with NULL (e.g. when creator deleted their account and
+        # user_id was SET NULL) evaluates to SQL NULL, not TRUE, silently dropping rows.
+        own_profile_ids = [p.id for p in own_profiles] or ["00000000-0000-0000-0000-000000000000"]
         shared_result = await self.db.execute(
             select(Profile).join(
                 ProfileAccess,
@@ -101,7 +111,7 @@ class SharingService:
                     ProfileAccess.granted_to_user_id == user_id,
                     ProfileAccess.status == "active",
                 )
-            ).where(Profile.user_id != user_id)
+            ).where(Profile.id.not_in(own_profile_ids))
         )
         shared_profiles = list(shared_result.scalars().all())
 

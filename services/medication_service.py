@@ -89,11 +89,14 @@ class MedicationService:
         return medication
 
     async def add_medication(self, profile_id: str, user_id: str, medication_data: MedicationCreate, request_id: str = "unknown") -> Medication:
-        profile_result = await self.db.execute(
-            select(Profile).where(Profile.id == profile_id, Profile.user_id == user_id)
+        # Role-aware: owners and caregivers can add medications. Viewers cannot.
+        from services.sharing_service import SharingService
+        role = await SharingService(db=self.db).get_user_role_for_profile(
+            profile_id=profile_id, user_id=user_id
         )
-        if not profile_result.scalar_one_or_none():
-            raise MedicationNotFoundError(medication_id=profile_id)
+        if not role or role == "viewer":
+            from core.exceptions import AuthorizationError
+            raise AuthorizationError("Viewers cannot add medications.")
 
         sanitized_name = sanitize_medication_name(medication_data.name)
         existing_result = await self.db.execute(
@@ -140,7 +143,15 @@ class MedicationService:
         return medication
 
     async def update_medication(self, medication_id: str, user_id: str, update_data: MedicationUpdate, request_id: str = "unknown") -> Medication:
+        # Viewers cannot update medications — caregiver minimum required
         medication = await self.get_medication(medication_id=medication_id, user_id=user_id, request_id=request_id)
+        from services.sharing_service import SharingService
+        role = await SharingService(db=self.db).get_user_role_for_profile(
+            profile_id=str(medication.profile_id), user_id=user_id
+        )
+        if not role or role == "viewer":
+            from core.exceptions import AuthorizationError
+            raise AuthorizationError("Viewers cannot update medications.")
         updates = update_data.model_dump(exclude_unset=True)
 
         for forbidden in ("id", "profile_id", "user_id", "created_at", "fda_data_fetched_at"):
@@ -164,7 +175,15 @@ class MedicationService:
         return medication
 
     async def delete_medication(self, medication_id: str, user_id: str, request_id: str = "unknown") -> None:
+        # Viewers cannot delete medications — caregiver minimum required
         medication = await self.get_medication(medication_id=medication_id, user_id=user_id, request_id=request_id)
+        from services.sharing_service import SharingService
+        role = await SharingService(db=self.db).get_user_role_for_profile(
+            profile_id=str(medication.profile_id), user_id=user_id
+        )
+        if not role or role == "viewer":
+            from core.exceptions import AuthorizationError
+            raise AuthorizationError("Viewers cannot delete medications.")
         medication.is_active = False  # Soft delete — retain for HIPAA audit history
 
         await self.audit.log(

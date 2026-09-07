@@ -42,7 +42,13 @@ class User(Base):
         "Profile",
         back_populates="user",
         foreign_keys="Profile.user_id",
-        cascade="all, delete-orphan"
+        # WARNING: Do NOT use cascade="all, delete-orphan" here.
+        # Profile.user_id is SET NULL (not CASCADE) at the DB level — a claimed profile
+        # must survive creator account deletion. If ORM cascade were enabled, deleting
+        # a User via db.delete(user) would cascade-delete all their created profiles,
+        # including ones already claimed by another patient.
+        # Account deletion uses raw SQL (api/routers/auth.py delete_account) — not ORM delete.
+        cascade="save-update, merge"
     )
 
     # Profiles SHARED WITH this user by others

@@ -5,7 +5,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.exceptions import NotFoundError
-from models.user import Medication, Profile, Reminder
+from models.user import Medication, Profile, ProfileAccess, Reminder
 from monitoring.audit import AuditEventType, AuditLogger, AuditOutcome
 from monitoring.logger import get_logger
 from schemas.all_schemas import ReminderCreate
@@ -25,7 +25,6 @@ class ReminderService:
         Access to the profile is verified at the API dependency layer.
         Here we verify the user has some role for the profile (owner, caregiver, or viewer).
         """
-        from models.user import ProfileAccess
         result = await self.db.execute(
             select(Reminder)
             .join(Profile, Reminder.profile_id == Profile.id)
@@ -56,12 +55,14 @@ class ReminderService:
         reminder_data: ReminderCreate,
         request_id: str = "unknown",
     ) -> Reminder:
-        # Verify profile ownership
-        profile_result = await self.db.execute(
-            select(Profile).where(Profile.id == profile_id, Profile.user_id == user_id)
+        # Role-aware: owners and caregivers can create reminders. Viewers cannot.
+        from services.sharing_service import SharingService
+        role = await SharingService(db=self.db).get_user_role_for_profile(
+            profile_id=profile_id, user_id=user_id
         )
-        if not profile_result.scalar_one_or_none():
-            raise NotFoundError("Profile")
+        if not role or role == "viewer":
+            from core.exceptions import AuthorizationError
+            raise AuthorizationError("Viewers cannot create reminders.")
 
         # Verify medication belongs to this profile (also an IDOR check)
         med_result = await self.db.execute(
@@ -102,14 +103,39 @@ class ReminderService:
         return reminder
 
     async def delete_reminder(self, reminder_id: str, user_id: str, request_id: str = "unknown") -> None:
+        # Viewers cannot delete reminders — caregiver minimum required
+        # Fetch reminder — role-aware join checks all three access routes
         result = await self.db.execute(
             select(Reminder)
             .join(Profile, Reminder.profile_id == Profile.id)
-            .where(Reminder.id == reminder_id, Profile.user_id == user_id)
+            .where(
+                Reminder.id == reminder_id,
+                or_(
+                    Profile.user_id == user_id,
+                    Profile.owner_user_id == user_id,
+                    Profile.id.in_(
+                        select(ProfileAccess.profile_id).where(
+                            and_(
+                                ProfileAccess.granted_to_user_id == user_id,
+                                ProfileAccess.status == "active",
+                            )
+                        )
+                    ),
+                )
+            )
         )
         reminder = result.scalar_one_or_none()
         if not reminder:
             raise NotFoundError("Reminder")
+
+        # Viewers cannot delete reminders — caregiver minimum required
+        from services.sharing_service import SharingService
+        role = await SharingService(db=self.db).get_user_role_for_profile(
+            profile_id=str(reminder.profile_id), user_id=user_id
+        )
+        if not role or role == "viewer":
+            from core.exceptions import AuthorizationError
+            raise AuthorizationError("Viewers cannot delete reminders.")
 
         reminder.is_active = False
 

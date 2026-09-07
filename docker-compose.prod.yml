@@ -1,0 +1,81 @@
+# docker-compose.prod.yml
+# Production overlay — run with:
+# docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# This file adds the FastAPI backend and ARQ worker to the base infrastructure
+# (Redis, ChromaDB, Prometheus, Grafana) defined in docker-compose.yml.
+
+services:
+
+  # ─── FASTAPI BACKEND ────────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pillara_api
+    image: pillara_api:latest
+    env_file:
+      - .env.production
+    environment:
+      - ENVIRONMENT=production
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
+      - REDIS_URL=redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+      chromadb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 90s
+      retries: 3
+    restart: always
+    volumes:
+      - /tmp/pillara_reports:/tmp/reports
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # ─── ARQ BACKGROUND WORKER ──────────────────────────────────────────────────
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pillara_worker
+    image: pillara_api:latest
+    command: ["arq", "workers.worker.WorkerSettings"]
+    env_file:
+      - .env.production
+    environment:
+      - ENVIRONMENT=production
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+      chromadb:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  # Override redis port in production — don't expose to host
+  redis:
+    ports: []
+
+  # Override chromadb port in production — don't expose to host
+  chromadb:
+    ports: []

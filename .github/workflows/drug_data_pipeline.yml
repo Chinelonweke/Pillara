@@ -64,6 +64,12 @@ jobs:
 
       - name: Run drug class pipeline
         env:
+          # Required by Settings() at import time — dummy values sufficient
+          # (pipeline does not connect to DB or Redis, but config validates these fields)
+          DATABASE_URL: postgresql+asyncpg://dummy:dummy@localhost:5432/dummy
+          REDIS_URL: redis://localhost:6379/0
+          JWT_SECRET_KEY: dummy-secret-key-that-is-at-least-32-characters-long
+          GROQ_API_KEY: dummy-key
           # ChromaDB connection
           CHROMADB_HOST: ${{ secrets.CHROMADB_HOST }}
           CHROMADB_PORT: ${{ secrets.CHROMADB_PORT }}

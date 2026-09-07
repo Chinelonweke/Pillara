@@ -1,7 +1,7 @@
 # services/reminder_service.py
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.exceptions import NotFoundError
@@ -20,14 +20,30 @@ class ReminderService:
         self.audit = AuditLogger(db=db)
 
     async def list_reminders(self, profile_id: str, user_id: str) -> list[Reminder]:
-        """IDOR safe: joins through Profile to verify user_id."""
+        """
+        Role-aware: allows owners, caregivers, and viewers to list reminders.
+        Access to the profile is verified at the API dependency layer.
+        Here we verify the user has some role for the profile (owner, caregiver, or viewer).
+        """
+        from models.user import ProfileAccess
         result = await self.db.execute(
             select(Reminder)
             .join(Profile, Reminder.profile_id == Profile.id)
             .where(
-                Profile.user_id == user_id,
                 Reminder.profile_id == profile_id,
                 Reminder.is_active.is_(True),
+                or_(
+                    Profile.user_id == user_id,
+                    Profile.owner_user_id == user_id,
+                    Profile.id.in_(
+                        select(ProfileAccess.profile_id).where(
+                            and_(
+                                ProfileAccess.granted_to_user_id == user_id,
+                                ProfileAccess.status == "active",
+                            )
+                        )
+                    ),
+                )
             )
             .order_by(Reminder.next_send_at.asc())
         )

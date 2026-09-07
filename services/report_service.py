@@ -36,10 +36,13 @@ class ReportService:
         include_inactive: bool = False,
         request_id: str = "unknown",
     ) -> ReportResponse:
-        # IDOR check: profile must belong to user_id
-        profile_result = await self.db.execute(
-            select(Profile).where(Profile.id == profile_id, Profile.user_id == user_id)
-        )
+        # Role-aware profile access — allows owners, caregivers, and viewers
+        from services.sharing_service import SharingService
+        sharing = SharingService(db=self.db)
+        role = await sharing.get_user_role_for_profile(profile_id=profile_id, user_id=user_id)
+        if not role:
+            raise ProfileNotFoundError(profile_id=profile_id)
+        profile_result = await self.db.execute(select(Profile).where(Profile.id == profile_id))
         profile = profile_result.scalar_one_or_none()
         if not profile:
             raise ProfileNotFoundError(profile_id=profile_id)

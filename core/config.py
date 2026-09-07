@@ -77,6 +77,7 @@ class Settings(BaseSettings):
     RATE_LIMIT_PER_MINUTE: int = 60
     RATE_LIMIT_PER_HOUR: int = 1000
     AUTH_RATE_LIMIT_PER_MINUTE: int = 5
+    TRUSTED_PROXY_IPS: str = "127.0.0.1"  # Comma-separated list of trusted proxy IPs (Nginx in production)
 
     # ── NOTIFICATIONS ─────────────────────────────────────────────────────────
     RESEND_API_KEY: Optional[str] = None

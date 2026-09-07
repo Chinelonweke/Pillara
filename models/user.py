@@ -68,7 +68,10 @@ class Profile(Base):
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
 
     # WHO CREATED THIS PROFILE — always set
-    user_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    # ondelete="SET NULL" instead of CASCADE — if the creator deletes their account,
+    # the profile should NOT be deleted if it has been claimed by another patient.
+    # The profile becomes orphaned (user_id=NULL) but the patient retains ownership.
+    user_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
 
     # WHO OWNS THIS PROFILE — NULL if unclaimed (patient hasn't joined Pillara yet)
     # When a caregiver creates "Mum's Profile", owner_user_id is NULL until Mum claims it

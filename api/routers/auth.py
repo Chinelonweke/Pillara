@@ -292,10 +292,12 @@ async def change_password(
     body: dict,
     current_user: CurrentUser,
     db: DBSession,
+    redis: RedisClient,
 ) -> SuccessResponse:
     """
     Change the authenticated user's password.
     Requires current password for verification.
+    Revokes all existing sessions immediately after change.
     """
     from core.security import verify_password, hash_password
     current_password = body.get("current_password", "")
@@ -316,8 +318,28 @@ async def change_password(
     current_user.hashed_password = hash_password(new_password)
     await db.commit()
 
-    logger.info("password_changed", user_id=str(current_user.id))
-    return SuccessResponse(message="Password changed successfully.")
+    # Revoke all existing sessions immediately — prevents attacker retaining
+    # access on a stolen device after the real user changes their password.
+    try:
+        from core.redis_client import SessionManager
+        session_manager = SessionManager(redis)
+        revoked = await session_manager.revoke_all_sessions(user_id=str(current_user.id))
+        logger.info("sessions_revoked_after_password_change", count=revoked, user_id=str(current_user.id))
+    except Exception as revoke_error:
+        # CRITICAL — password changed in DB but sessions survived in Redis.
+        # This means an attacker with a stolen token retains access until tokens expire.
+        # Page on-call immediately. Do not swallow silently.
+        logger.critical(
+            "password_change_session_revoke_failed_SECURITY_ALERT",
+            error=str(revoke_error),
+            user_id=str(current_user.id),
+            action_required="Manually revoke Redis sessions for this user immediately",
+        )
+        # Re-raise so Sentry captures it as an unhandled exception
+        raise
+
+    logger.info("password_changed_sessions_revoked", user_id=str(current_user.id))
+    return SuccessResponse(message="Password changed successfully. Please sign in again with your new password.")
 
 
 @router.delete(

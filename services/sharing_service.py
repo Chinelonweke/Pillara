@@ -174,6 +174,15 @@ class SharingService:
         if access.invite_token_expires < datetime.now(tz=timezone.utc):
             raise ValidationError("This invite link has expired. Ask the profile owner to send a new one.")
 
+        # Verify the accepting user is the intended recipient.
+        # This prevents any authenticated user who obtains the URL from accepting
+        # an invite meant for someone else.
+        if access.invite_email and accepting_user_email.lower().strip() != access.invite_email.lower().strip():
+            raise AuthorizationError(
+                "This invite was sent to a different email address. "
+                "Please sign in with the account that received the invite."
+            )
+
         access.granted_to_user_id = accepting_user_id
         access.invite_token = None
         access.invite_token_expires = None
@@ -262,6 +271,13 @@ class SharingService:
             raise ValidationError("Invalid or already used claim link.")
         if profile.claim_token_expires < datetime.now(tz=timezone.utc):
             raise ValidationError("This claim link has expired. Ask your caregiver to send a new one.")
+
+        # Verify the claiming user is the intended recipient.
+        if profile.claim_email and claiming_user_email.lower().strip() != profile.claim_email.lower().strip():
+            raise AuthorizationError(
+                "This claim link was sent to a different email address. "
+                "Please sign in with the account that received the claim link."
+            )
 
         previous_creator_id = profile.user_id
         profile.owner_user_id = claiming_user_id

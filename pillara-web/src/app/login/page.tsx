@@ -1,13 +1,14 @@
 'use client'
-import { useState } from 'react'
+import { useState, Suspense } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/lib/auth-context'
 import { APIError } from '@/lib/api'
 
-export default function LoginPage() {
+function LoginContent() {
   const { login } = useAuth()
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -20,7 +21,13 @@ export default function LoginPage() {
     setError('')
     try {
       await login(email, password)
-      router.push('/dashboard')
+      // Preserve same-origin redirect from invite/claim flows
+      const redirect = searchParams.get('redirect')
+      if (redirect && redirect.startsWith('/')) {
+        router.push(redirect)
+      } else {
+        router.push('/dashboard')
+      }
     } catch (err) {
       setError(err instanceof APIError ? err.message : 'Login failed. Please try again.')
     } finally {
@@ -177,5 +184,12 @@ export default function LoginPage() {
         </div>
       </div>
     </div>
+  )
+}
+export default function LoginPageWrapper() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><p>Loading...</p></div>}>
+      <LoginContent />
+    </Suspense>
   )
 }

@@ -71,9 +71,20 @@ async def get_current_profile(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> Profile:
-    result = await db.execute(
-        select(Profile).where(Profile.id == profile_id, Profile.user_id == current_user.id)
+    """
+    Role-aware profile access — replaces the old user_id == profile.user_id check.
+    Allows owners, caregivers, and viewers to access profiles they have been
+    granted access to, not just profiles they created.
+    """
+    from services.sharing_service import SharingService
+    sharing = SharingService(db=db)
+    role = await sharing.get_user_role_for_profile(
+        profile_id=profile_id,
+        user_id=str(current_user.id),
     )
+    if not role:
+        raise ProfileNotFoundError(profile_id=profile_id)
+    result = await db.execute(select(Profile).where(Profile.id == profile_id))
     profile = result.scalar_one_or_none()
     if not profile:
         raise ProfileNotFoundError(profile_id=profile_id)
@@ -85,9 +96,19 @@ async def get_profile_from_query(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> Profile:
-    result = await db.execute(
-        select(Profile).where(Profile.id == profile_id, Profile.user_id == current_user.id)
+    """
+    Role-aware profile access for query-parameter based profile lookups.
+    Same role resolution as get_current_profile.
+    """
+    from services.sharing_service import SharingService
+    sharing = SharingService(db=db)
+    role = await sharing.get_user_role_for_profile(
+        profile_id=profile_id,
+        user_id=str(current_user.id),
     )
+    if not role:
+        raise ProfileNotFoundError(profile_id=profile_id)
+    result = await db.execute(select(Profile).where(Profile.id == profile_id))
     profile = result.scalar_one_or_none()
     if not profile:
         raise ProfileNotFoundError(profile_id=profile_id)
@@ -124,30 +145,59 @@ async def rate_limit_auth(
     redis: Redis = Depends(get_redis),
     x_forwarded_for: Optional[str] = Header(None),
 ) -> None:
-    if x_forwarded_for:
+    """
+    Separate per-IP and per-email rate limits for auth endpoints.
+    Using a combined IP:email key is bypassable — rotating either half
+    creates a fresh limit bucket. Separate limits prevent both:
+    - Brute force from one IP against many accounts (per-IP limit)
+    - Credential stuffing from many IPs against one account (per-email limit)
+
+    Only trust X-Forwarded-For from configured trusted proxies to prevent
+    IP spoofing via header injection.
+    """
+    # Only trust X-Forwarded-For if it comes through a configured proxy
+    # (Nginx sets this in production). In development, use client IP directly.
+    trusted_proxy = getattr(settings, 'TRUSTED_PROXY_IPS', None)
+    client_ip = request.client.host if request.client else "unknown"
+
+    if x_forwarded_for and (not trusted_proxy or client_ip in trusted_proxy.split(",")):
         raw_ip = x_forwarded_for.split(",")[0].strip()
     else:
-        raw_ip = request.client.host if request.client else "unknown"
+        raw_ip = client_ip
 
     from core.security import hash_ip_address
     ip_hash = hash_ip_address(raw_ip)
 
     try:
         body = await request.json()
-        email = body.get("email", "unknown")
+        email = body.get("email", "unknown").lower().strip()
     except Exception:
         email = "unknown"
 
     limiter = RateLimiter(redis)
-    identifier = limiter.make_auth_identifier(ip_hash=ip_hash, email=email)
-    allowed, count, limit = await limiter.check_rate_limit(
-        identifier=identifier,
+
+    # Check per-IP rate limit
+    ip_allowed, _, _ = await limiter.check_rate_limit(
+        identifier=f"ip:{ip_hash}",
         limit=settings.AUTH_RATE_LIMIT_PER_MINUTE,
         window_seconds=60,
-        namespace="auth",
+        namespace="auth_ip",
     )
-    if not allowed:
+    if not ip_allowed:
         raise RateLimitError(retry_after_seconds=60, limit_type="authentication attempts")
+
+    # Check per-email/account rate limit (prevents credential stuffing)
+    if email != "unknown":
+        from hashlib import sha256
+        email_hash = sha256(email.encode()).hexdigest()[:16]
+        email_allowed, _, _ = await limiter.check_rate_limit(
+            identifier=f"email:{email_hash}",
+            limit=settings.AUTH_RATE_LIMIT_PER_MINUTE,
+            window_seconds=60,
+            namespace="auth_email",
+        )
+        if not email_allowed:
+            raise RateLimitError(retry_after_seconds=60, limit_type="authentication attempts")
 
 
 async def rate_limit_llm(

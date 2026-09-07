@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.exceptions import DuplicateMedicationError, MedicationNotFoundError
@@ -20,11 +20,31 @@ class MedicationService:
         self.audit = AuditLogger(db=db)
 
     def _ownership_query(self, user_id: str):
-        """Base query joining Medication → Profile filtering by user_id. All queries use this for IDOR protection."""
+        """
+        Base query joining Medication → Profile.
+        Checks both direct ownership (user_id) AND shared access (owner_user_id or ProfileAccess).
+        This allows caregivers and owners to access medications they are authorized for.
+        The role is verified at the API dependency layer (get_profile_from_query).
+        Here we simply verify the profile exists and the user has some access to it.
+        """
+        from models.user import ProfileAccess
         return (
             select(Medication)
             .join(Profile, Medication.profile_id == Profile.id)
-            .where(Profile.user_id == user_id)
+            .where(
+                or_(
+                    Profile.user_id == user_id,
+                    Profile.owner_user_id == user_id,
+                    Profile.id.in_(
+                        select(ProfileAccess.profile_id).where(
+                            and_(
+                                ProfileAccess.granted_to_user_id == user_id,
+                                ProfileAccess.status == "active",
+                            )
+                        )
+                    ),
+                )
+            )
         )
 
     async def list_medications(self, profile_id: str, user_id: str, include_inactive: bool = False, request_id: str = "unknown") -> list[Medication]:

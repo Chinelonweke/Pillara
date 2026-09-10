@@ -41,6 +41,13 @@ function formatNextSend(isoString: string | null): string {
   return `In ${diffDays} day${diffDays !== 1 ? 's' : ''}`
 }
 
+function frequencyLabel(reminder: Reminder): string {
+  if (!reminder.is_recurring) return 'One-time'
+  if (reminder.recurrence_rule?.includes('DAILY')) return 'Daily'
+  if (reminder.recurrence_rule?.includes('WEEKLY')) return 'Weekly'
+  return 'Recurring'
+}
+
 function RemindersContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -51,10 +58,10 @@ function RemindersContent() {
   const [loading, setLoading] = useState(true)
   const [showAddForm, setShowAddForm] = useState(false)
 
+  // Form state
   const [selectedMedId, setSelectedMedId] = useState('')
-  const [reminderTime, setReminderTime] = useState('08:00')
-  const [isRecurring, setIsRecurring] = useState(true)
-  const [frequency, setFrequency] = useState('FREQ=DAILY')
+  const [times, setTimes] = useState<string[]>(['08:00'])  // Multiple times support
+  const [frequency, setFrequency] = useState<'daily' | 'weekly' | 'once'>('daily')
   const [notifyEmail, setNotifyEmail] = useState(true)
   const [adding, setAdding] = useState(false)
   const [addError, setAddError] = useState('')
@@ -82,51 +89,90 @@ function RemindersContent() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profileId])
 
-  useEffect(() => {
+    useEffect(() => {
     if (!profileId) { router.push('/dashboard'); return }
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    loadData()
-  }, [profileId, loadData, router])
+    const fetchData = async () => { await loadData() }
+    fetchData().catch(console.error)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profileId, router])
+
+  const addTime = () => {
+    setTimes(prev => [...prev, '12:00'])
+  }
+
+  const removeTime = (index: number) => {
+    if (times.length === 1) return  // Always keep at least one
+    setTimes(prev => prev.filter((_, i) => i !== index))
+  }
+
+  const updateTime = (index: number, value: string) => {
+    setTimes(prev => prev.map((t, i) => i === index ? value : t))
+  }
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!selectedMedId) { setAddError('Please select a medication'); return }
+    if (times.length === 0) { setAddError('Please add at least one time'); return }
+
     setAdding(true)
     setAddError('')
 
-    const today = new Date()
-    const [hours, minutes] = reminderTime.split(':').map(Number)
-    today.setHours(hours, minutes, 0, 0)
+    // Create one reminder record per time — this is the correct clinical data model.
+    // Each administration time is tracked independently for sending and auditing.
+    const recurrenceRule = frequency === 'daily' ? 'FREQ=DAILY'
+      : frequency === 'weekly' ? 'FREQ=WEEKLY'
+      : null
 
-    if (today < new Date()) {
-      today.setDate(today.getDate() + 1)
+    const created: Reminder[] = []
+    const errors: string[] = []
+
+    for (const time of times) {
+      const today = new Date()
+      const [hours, minutes] = time.split(':').map(Number)
+      today.setHours(hours, minutes, 0, 0)
+      if (today < new Date()) {
+        today.setDate(today.getDate() + 1)
+      }
+
+      try {
+        const res = await fetch(`${API_BASE}/api/v1/reminders/?profile_id=${profileId}`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            medication_id: selectedMedId,
+            reminder_time: today.toISOString(),
+            is_recurring: frequency !== 'once',
+            recurrence_rule: recurrenceRule,
+            notify_push: false,
+            notify_email: notifyEmail,
+            notify_sms: false,
+          }),
+        })
+        const data = await res.json()
+        if (res.ok) {
+          created.push(data)
+        } else {
+          errors.push(`${time}: ${data.message || 'Failed'}`)
+        }
+      } catch {
+        errors.push(`${time}: Network error`)
+      }
     }
 
-    try {
-      const res = await fetch(`${API_BASE}/api/v1/reminders/?profile_id=${profileId}`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          medication_id: selectedMedId,
-          reminder_time: today.toISOString(),
-          is_recurring: isRecurring,
-          recurrence_rule: isRecurring ? frequency : null,
-          notify_push: false,
-          notify_email: notifyEmail,
-          notify_sms: false,
-        }),
-      })
-      const data = await res.json()
-      if (!res.ok) { setAddError(data.message || 'Failed to create reminder'); return }
-      setReminders(prev => [...prev, data])
+    if (created.length > 0) {
+      setReminders(prev => [...prev, ...created])
+    }
+
+    if (errors.length > 0) {
+      setAddError(`Some reminders failed: ${errors.join(', ')}`)
+    } else {
       setShowAddForm(false)
       setSelectedMedId('')
-      setReminderTime('08:00')
-    } catch {
-      setAddError('Something went wrong. Please try again.')
-    } finally {
-      setAdding(false)
+      setTimes(['08:00'])
+      setFrequency('daily')
     }
+
+    setAdding(false)
   }
 
   const handleDelete = async (reminderId: string) => {
@@ -142,10 +188,18 @@ function RemindersContent() {
     }
   }
 
-  const getMedName = (medId: string) => {
-    const med = medications.find(m => m.id === medId)
-    return med ? `${med.name}${med.dosage ? ` (${med.dosage})` : ''}` : 'Unknown medication'
-  }
+  // Group reminders by medication for cleaner display
+  const groupedReminders = medications.reduce<Record<string, Reminder[]>>((acc, med) => {
+    const medReminders = reminders.filter(r => r.medication_id === med.id)
+    if (medReminders.length > 0) {
+      acc[med.id] = medReminders.sort((a, b) =>
+        new Date(a.reminder_time).getTime() - new Date(b.reminder_time).getTime()
+      )
+    }
+    return acc
+  }, {})
+
+  const timesLabel = (count: number) => `${count} time${count !== 1 ? 's' : ''} daily`
 
   return (
     <div className="min-h-screen bg-[var(--background)]">
@@ -176,7 +230,7 @@ function RemindersContent() {
         <div className="mb-8">
           <h1 className="text-2xl font-bold text-[var(--foreground)]">Medication Reminders</h1>
           <p className="text-[var(--muted)] text-sm mt-1">
-            Get email reminders to take your medications on time.
+            Set reminders for each time you need to take your medications. Add multiple times for medications taken more than once daily.
           </p>
         </div>
 
@@ -184,7 +238,8 @@ function RemindersContent() {
           <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-6 mb-8">
             <div className="flex items-center justify-between mb-5">
               <h2 className="text-[var(--foreground)] font-semibold">New reminder</h2>
-              <button onClick={() => setShowAddForm(false)} className="text-[var(--muted)] hover:text-[var(--foreground)] text-lg">✕</button>
+              <button onClick={() => { setShowAddForm(false); setTimes(['08:00']); setAddError('') }}
+                className="text-[var(--muted)] hover:text-[var(--foreground)] text-lg">✕</button>
             </div>
 
             {addError && (
@@ -193,7 +248,9 @@ function RemindersContent() {
               </div>
             )}
 
-            <form onSubmit={handleAdd} className="space-y-4">
+            <form onSubmit={handleAdd} className="space-y-5">
+
+              {/* Medication select */}
               <div>
                 <label className="block text-sm font-medium text-[var(--foreground)] mb-2">Medication</label>
                 {medications.length === 0 ? (
@@ -215,56 +272,75 @@ function RemindersContent() {
                 )}
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-[var(--foreground)] mb-2">Time</label>
-                <input
-                  type="time"
-                  value={reminderTime}
-                  onChange={e => setReminderTime(e.target.value)}
-                  required
-                  className="w-full bg-[var(--surface)] border border-[var(--border)] rounded-lg px-4 py-2.5 text-[var(--foreground)] focus:outline-none focus:border-[var(--primary)] text-sm"
-                />
-              </div>
-
+              {/* Frequency */}
               <div>
                 <label className="block text-sm font-medium text-[var(--foreground)] mb-2">Frequency</label>
                 <div className="flex gap-3">
-                  <button
-                    type="button"
-                    onClick={() => { setIsRecurring(true); setFrequency('FREQ=DAILY') }}
-                    className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                      isRecurring && frequency === 'FREQ=DAILY'
-                        ? 'bg-[var(--primary)] text-[var(--foreground)]'
-                        : 'bg-[var(--surface)] border border-[var(--border)] text-[var(--foreground)] hover:border-[var(--primary)]/50'
-                    }`}
-                  >
-                    Daily
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { setIsRecurring(true); setFrequency('FREQ=WEEKLY') }}
-                    className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                      isRecurring && frequency === 'FREQ=WEEKLY'
-                        ? 'bg-[var(--primary)] text-[var(--foreground)]'
-                        : 'bg-[var(--surface)] border border-[var(--border)] text-[var(--foreground)] hover:border-[var(--primary)]/50'
-                    }`}
-                  >
-                    Weekly
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setIsRecurring(false)}
-                    className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                      !isRecurring
-                        ? 'bg-[var(--primary)] text-[var(--foreground)]'
-                        : 'bg-[var(--surface)] border border-[var(--border)] text-[var(--foreground)] hover:border-[var(--primary)]/50'
-                    }`}
-                  >
-                    Once
-                  </button>
+                  {(['daily', 'weekly', 'once'] as const).map(f => (
+                    <button
+                      key={f}
+                      type="button"
+                      onClick={() => setFrequency(f)}
+                      className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors capitalize ${
+                        frequency === f
+                          ? 'bg-[var(--primary)] text-[var(--foreground)]'
+                          : 'bg-[var(--surface)] border border-[var(--border)] text-[var(--foreground)] hover:border-[var(--primary)]/50'
+                      }`}
+                    >
+                      {f === 'once' ? 'One-time' : f.charAt(0).toUpperCase() + f.slice(1)}
+                    </button>
+                  ))}
                 </div>
               </div>
 
+              {/* Times — multiple support */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-sm font-medium text-[var(--foreground)]">
+                    {frequency === 'once' ? 'Time' : `Times per ${frequency === 'daily' ? 'day' : 'week'}`}
+                  </label>
+                  {frequency !== 'once' && (
+                    <button
+                      type="button"
+                      onClick={addTime}
+                      className="text-xs font-medium text-[var(--primary)] hover:underline"
+                    >
+                      + Add another time
+                    </button>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  {times.map((time, index) => (
+                    <div key={index} className="flex items-center gap-3">
+                      <input
+                        type="time"
+                        value={time}
+                        onChange={e => updateTime(index, e.target.value)}
+                        required
+                        className="flex-1 bg-[var(--surface)] border border-[var(--border)] rounded-lg px-4 py-2.5 text-[var(--foreground)] focus:outline-none focus:border-[var(--primary)] text-sm"
+                      />
+                      {times.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeTime(index)}
+                          className="text-[var(--muted)] hover:text-red-400 text-sm transition-colors px-2"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                {times.length > 1 && (
+                  <p className="text-xs text-[var(--muted)] mt-2">
+                    {times.length} reminders will be created — one for each time above.
+                  </p>
+                )}
+              </div>
+
+              {/* Email notification */}
               <div className="flex items-center gap-3 bg-[var(--surface)] border border-[var(--border)] rounded-lg px-4 py-3">
                 <input
                   type="checkbox"
@@ -283,7 +359,12 @@ function RemindersContent() {
                 disabled={adding || medications.length === 0}
                 className="w-full bg-[var(--primary)] hover:bg-[#3d8a7d] disabled:opacity-50 text-[var(--foreground)] py-3 rounded-lg text-sm font-medium transition-colors"
               >
-                {adding ? 'Creating...' : 'Create reminder'}
+                {adding
+                  ? 'Creating...'
+                  : times.length > 1
+                  ? `Create ${times.length} reminders`
+                  : 'Create reminder'
+                }
               </button>
             </form>
           </div>
@@ -308,62 +389,63 @@ function RemindersContent() {
             </button>
           </div>
         ) : (
-          <div className="space-y-3">
-            {reminders.map(reminder => (
-              <div
-                key={reminder.id}
-                className="bg-[var(--surface)] border border-[var(--border)] rounded-xl px-5 py-4 flex items-center justify-between group"
-              >
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 bg-[var(--primary)]/10 border border-[var(--primary)]/20 rounded-full flex items-center justify-center flex-shrink-0">
-                    <span className="text-[var(--primary)] text-lg">⏰</span>
+          <div className="space-y-6">
+            {Object.entries(groupedReminders).map(([medId, medReminders]) => {
+              const med = medications.find(m => m.id === medId)
+              const freqLabel = frequencyLabel(medReminders[0])
+              const isDailyMultiple = freqLabel === 'Daily' && medReminders.length > 1
+
+              return (
+                <div key={medId} className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl overflow-hidden">
+                  {/* Medication header */}
+                  <div className="px-5 py-4 border-b border-[var(--border)] flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 bg-[var(--primary)]/10 rounded-full flex items-center justify-center">
+                        <span className="text-[var(--primary)] text-base">⏰</span>
+                      </div>
+                      <div>
+                        <p className="text-[var(--foreground)] font-semibold text-sm capitalize">
+                          {med?.name || 'Unknown medication'}
+                          {med?.dosage ? <span className="font-normal text-[var(--muted)]"> ({med.dosage})</span> : ''}
+                        </p>
+                        <p className="text-[var(--muted)] text-xs mt-0.5">
+                          {freqLabel}
+                          {isDailyMultiple ? ` · ${timesLabel(medReminders.length)}` : ''}
+                          {notifyEmail ? ' · 📧 Email' : ''}
+                        </p>
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-[var(--foreground)] font-medium text-sm capitalize">
-                      {getMedName(reminder.medication_id)}
-                    </p>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-[var(--muted)] text-xs">
-                        {formatTime(reminder.reminder_time)}
-                      </span>
-                      <span className="text-slate-600 text-xs">·</span>
-                      <span className="text-[var(--muted)] text-xs">
-                        {reminder.is_recurring
-                          ? reminder.recurrence_rule?.includes('DAILY') ? 'Daily' : 'Weekly'
-                          : 'One-time'
-                        }
-                      </span>
-                      {reminder.next_send_at && (
-                        <>
-                          <span className="text-slate-600 text-xs">·</span>
-                          <span className="text-[var(--primary)] text-xs">
-                            {formatNextSend(reminder.next_send_at)}
-                          </span>
-                        </>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2 mt-1">
-                      {reminder.notify_email && (
-                        <span className="text-xs bg-[var(--surface)] border border-[var(--border)] rounded-full px-2 py-0.5 text-[var(--muted)]">
-                          📧 Email
-                        </span>
-                      )}
-                      {reminder.notify_push && (
-                        <span className="text-xs bg-[var(--surface)] border border-[var(--border)] rounded-full px-2 py-0.5 text-[var(--muted)]">
-                          🔔 Push
-                        </span>
-                      )}
-                    </div>
+
+                  {/* Individual times */}
+                  <div className="divide-y divide-[var(--border)]">
+                    {medReminders.map((reminder, idx) => (
+                      <div key={reminder.id} className="px-5 py-3 flex items-center justify-between group">
+                        <div className="flex items-center gap-3">
+                          <span className="text-xs text-[var(--muted)] w-6 text-right">{idx + 1}.</span>
+                          <div>
+                            <span className="text-[var(--foreground)] font-medium text-sm">
+                              {formatTime(reminder.reminder_time)}
+                            </span>
+                            {reminder.next_send_at && (
+                              <span className="text-[var(--primary)] text-xs ml-2">
+                                {formatNextSend(reminder.next_send_at)}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleDelete(reminder.id)}
+                          className="opacity-0 group-hover:opacity-100 text-[var(--muted)] hover:text-red-400 text-xs transition-all"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    ))}
                   </div>
                 </div>
-                <button
-                  onClick={() => handleDelete(reminder.id)}
-                  className="opacity-0 group-hover:opacity-100 text-[var(--muted)] hover:text-red-400 text-xs transition-all"
-                >
-                  Delete
-                </button>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </main>

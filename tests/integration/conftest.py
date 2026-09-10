@@ -48,3 +48,65 @@ async def client():
         base_url="http://test",
     ) as c:
         yield c
+
+# ─── RAG PIPELINE FIXTURE ─────────────────────────────────────────────────────
+# Required by tests/integration/test_rag_pipeline.py
+#
+# SETUP REQUIREMENTS:
+# 1. ChromaDB must be running (docker-compose up -d chromadb)
+# 2. Redis must be running (docker-compose up -d redis)
+# 3. Run seed script first: python scripts/seed_drug_data.py --drugs warfarin ibuprofen aspirin
+#
+# The fixture uses the production ChromaDB collection.
+# Tests that require seeded data are marked with @pytest.mark.requires_seeded_data.
+# CI runs these only when the integration test suite is explicitly triggered.
+
+@pytest_asyncio.fixture(scope="session")
+async def rag_pipeline():
+    """
+    Real RAGPipeline instance connected to live ChromaDB and Redis.
+    Requires services to be running and ChromaDB to be seeded.
+    """
+    from core.config import settings
+    from core.redis_client import get_redis
+
+    # Warn loudly if services are not available rather than silently skipping
+    redis_client = None
+    try:
+        redis_client = await get_redis()
+        await redis_client.ping()
+    except Exception as e:
+        pytest.skip(
+            f"Redis not available for integration tests: {e}. "
+            f"Start with: docker-compose up -d redis"
+        )
+
+    try:
+        import chromadb
+        from chromadb.config import Settings as ChromaSettings
+        chroma = chromadb.HttpClient(
+            host=settings.CHROMA_HOST,
+            port=settings.CHROMA_PORT,
+            settings=ChromaSettings(anonymized_telemetry=False),
+        )
+        chroma.heartbeat()
+    except Exception as e:
+        pytest.skip(
+            f"ChromaDB not available for integration tests: {e}. "
+            f"Start with: docker-compose up -d chromadb"
+        )
+
+    try:
+        from ai.rag.pipeline import RAGPipeline
+        pipeline = RAGPipeline(redis=redis_client)
+        # __init__ handles all setup synchronously — no initialize() needed
+    except Exception as e:
+        pytest.fail(
+            f"RAGPipeline failed to initialize: {e}. "
+            f"This is a hard failure — pipeline initialization must succeed."
+        )
+
+    yield pipeline
+
+    if redis_client:
+        await redis_client.aclose()

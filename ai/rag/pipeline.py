@@ -35,15 +35,26 @@ class RetrievedChunk:
     """
     Represents one retrieved document chunk from ChromaDB.
     This is the unit of information the RAG pipeline works with.
+
+    Score fields — CRITICAL: these must never be conflated.
+    similarity_score: cosine similarity from vector search (0.0-1.0).
+                      Set to 0.0 if this chunk was NEVER returned by vector search.
+                      This is the ONLY score used by the confidence gate.
+    keyword_score:    BM25 tanh-normalised keyword match score (0.0-1.0).
+                      Set to 0.0 if this chunk was never returned by BM25 search.
+                      Used for RRF fusion ranking only — NEVER for the gate.
+    final_score:      Score after cross-encoder reranking. Used for display and
+                      chunk selection — not for the gate.
     """
     chunk_id: str           # unique identifier of this chunk
     text: str               # the actual drug information text
-    similarity_score: float # how similar this chunk is to the query (0.0 to 1.0)
+    similarity_score: float = 0.0  # vector cosine similarity — gate uses this only
+    keyword_score: float = 0.0     # BM25 keyword score — never used for gate
     drug_name: str = ""     # which drug this chunk is about
     section: str = ""       # which section: "interactions", "side_effects", etc.
     source: str = ""        # where the information came from (FDA label, etc.)
     severity_flag: str = "" # "high", "moderate", "low" for interaction chunks
-    final_score: float = 0.0 # score after re-ranking (overwrites similarity_score)
+    final_score: float = 0.0 # score after cross-encoder reranking
 
 
 @dataclass
@@ -592,9 +603,24 @@ class RAGPipeline:
                 pipeline_start=pipeline_start,
             )
 
-        best_score = max(chunk.similarity_score for chunk in combined_chunks)
-        # max() returns the largest value from an iterable
-        # We find the highest similarity score across all retrieved chunks
+        # Confidence gate — ONLY use vector similarity scores.
+        # BM25 keyword scores (chunk.keyword_score) are explicitly excluded here.
+        # A keyword match proves lexical overlap, not semantic relevance.
+        # The gate requires vector evidence that we have genuinely relevant information.
+        # If ALL chunks came from BM25-only (no vector matches), best_score = 0.0
+        # and the gate correctly fires the safe fallback.
+        vector_scores = [c.similarity_score for c in combined_chunks if c.similarity_score > 0]
+        best_score = max(vector_scores) if vector_scores else 0.0
+        logger.debug(
+            "confidence_gate_inputs",
+            total_chunks=len(combined_chunks),
+            chunks_with_vector_score=len(vector_scores),
+            best_vector_score=round(best_score, 4),
+            has_keyword_only_chunks=any(
+                c.similarity_score == 0.0 and c.keyword_score > 0
+                for c in combined_chunks
+            ),
+        )
 
         # ── CONFIDENCE GATE ────────────────────────────────────────────────
         # THIS IS THE MOST IMPORTANT SAFETY CHECK IN THE ENTIRE PIPELINE
@@ -773,7 +799,18 @@ class RAGPipeline:
                        "latency_ms": round((time.monotonic() - pipeline_start) * 1000, 2)}
                 return
 
-            best_score = max(chunk.similarity_score for chunk in combined_chunks)
+            vector_scores = [c.similarity_score for c in combined_chunks if c.similarity_score > 0]
+            best_score = max(vector_scores) if vector_scores else 0.0
+            logger.debug(
+                "confidence_gate_inputs",
+                total_chunks=len(combined_chunks),
+                chunks_with_vector_score=len(vector_scores),
+                best_vector_score=round(best_score, 4),
+                has_keyword_only_chunks=any(
+                    c.similarity_score == 0.0 and c.keyword_score > 0
+                    for c in combined_chunks
+                ),
+            )
             top_chunks = self._rerank_chunks(
                 query=user_query, chunks=combined_chunks,
                 top_k=settings.RAG_TOP_K_RESULTS,
@@ -996,7 +1033,8 @@ class RAGPipeline:
             chunk = RetrievedChunk(
                 chunk_id=metadata.get("chunk_id", "bm25_result"),
                 text=doc,
-                similarity_score=round(normalised_score, 4),
+                similarity_score=0.0,           # no vector evidence — intentionally 0
+                keyword_score=round(normalised_score, 4),  # BM25 score only
                 drug_name=metadata.get("drug_name", ""),
                 section=metadata.get("section", ""),
                 source=metadata.get("source", ""),
@@ -1073,7 +1111,7 @@ class RAGPipeline:
         )[:top_k]
 
         # Extract just the chunk objects (not the scores)
-        # Update the similarity_score with the RRF score for transparency
+        # Set final_score with the RRF fusion score (note: similarity_score is NOT touched here — it retains its original vector cosine value)
         combined_chunks = []
         for rrf_score, chunk in sorted_results:
             chunk.final_score = round(rrf_score, 6)

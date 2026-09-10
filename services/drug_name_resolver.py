@@ -72,38 +72,68 @@ async def resolve_to_generic(drug_name: str, redis=None) -> str:
 
             # ── Step 2: Word extraction for Nigerian/African brand names ──
             # Many Nigerian brands follow: "[Manufacturer] [INN] [Dose]"
-            # e.g. "Emzor Paracetamol 500mg" → try each word → "Paracetamol" found
-            # e.g. "Amoxil 250mg" → skip "250mg" (numeric) → try "Amoxil" → found
-            # This handles brands RxNorm doesn't know by extracting the INN.
-            # No hardcoding — works for any brand following this naming convention.
+            # e.g. "Emzor Paracetamol 500mg" → INN is "Paracetamol" (second word)
+            #
+            # Algorithm (in order):
+            # 1. Try EXACT match (search=0) for each candidate word, right-to-left
+            #    (INN is typically the last meaningful word, manufacturer is first)
+            # 2. If no exact match found anywhere, try FUZZY match right-to-left
+            #    (fuzzy/search=1 can match manufacturer names to wrong drugs)
+            # This prevents a manufacturer prefix like "Emzor" from fuzzy-matching
+            # some unrelated RxNorm concept before the real INN is tried.
             if not result and len(name_lower.split()) > 1:
                 import re
-                # Extract meaningful words:
-                # - 4+ alphabetic characters only
-                # - Skip dose strings like "250mg", "400mg", "DS", "XR", "XL"
-                # - Skip manufacturer prefixes that are clearly not drug names
                 SKIP_WORDS = {
                     'tablet', 'capsule', 'syrup', 'injection', 'suspension',
                     'cream', 'ointment', 'drops', 'plus', 'extra', 'forte',
                     'junior', 'adult', 'night', 'rapid', 'extended', 'release',
                 }
                 words = re.findall(r'[a-zA-Z]{4,}', drug_name)
-                for word in words:
-                    word_lower = word.lower()
-                    if word_lower == name_lower:
-                        continue  # Skip if same as full name
-                    if word_lower in SKIP_WORDS:
-                        continue  # Skip non-drug descriptor words
-                    word_result = await rxnorm_lookup(word)
-                    if word_result:
-                        result = word_result
-                        logger.info(
-                            "rxnorm_word_extraction",
-                            original=drug_name,
-                            matched_word=word,
-                            generic=word_result[1],
+                candidate_words = [
+                    w for w in words
+                    if w.lower() != name_lower and w.lower() not in SKIP_WORDS
+                ]
+
+                # Pass 1: Exact match across all candidates, right-to-left
+                # (INN typically last, manufacturer typically first)
+                for word in reversed(candidate_words):
+                    try:
+                        r = await client.get(
+                            f"{RXNORM_BASE}/rxcui.json",
+                            params={"name": word, "search": 0}  # exact match
                         )
-                        break
+                        rxcui_list = r.json().get("idGroup", {}).get("rxnormId", [])
+                        if rxcui_list:
+                            r2 = await client.get(f"{RXNORM_BASE}/rxcui/{rxcui_list[0]}/properties.json")
+                            generic = r2.json().get("properties", {}).get("name", word).lower()
+                            result = (rxcui_list[0], generic)
+                            logger.info(
+                                "rxnorm_word_extraction_exact",
+                                original=drug_name,
+                                matched_word=word,
+                                generic=generic,
+                                match_type="exact",
+                            )
+                            break
+                    except Exception as exact_err:
+                        logger.debug("rxnorm_exact_word_failed", word=word, error=str(exact_err))
+
+                # Pass 2: Fuzzy match across all candidates, right-to-left
+                # Only runs if exact match found nothing
+                if not result:
+                    for word in reversed(candidate_words):
+                        word_result = await rxnorm_lookup(word)
+                        if word_result:
+                            result = word_result
+                            logger.info(
+                                "rxnorm_word_extraction_fuzzy",
+                                original=drug_name,
+                                matched_word=word,
+                                generic=word_result[1],
+                                match_type="fuzzy",
+                                warning="fuzzy_match_verify_manually",
+                            )
+                            break
 
             if not result:
                 logger.debug("rxnorm_no_match", drug=drug_name)

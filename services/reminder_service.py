@@ -154,8 +154,10 @@ class ReminderService:
 
         result = await self.db.execute(
             select(Reminder)
+            .join(Medication, Reminder.medication_id == Medication.id)
             .where(
                 Reminder.is_active.is_(True),
+                Medication.is_active.is_(True),  # Don't remind about discontinued/deleted medications
                 Reminder.next_send_at <= now,
                 # Either not locked, or lock is stale (worker crashed >5 min ago)
                 (Reminder.processing_locked_at.is_(None)) |

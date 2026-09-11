@@ -3,9 +3,7 @@ import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/lib/auth-context'
-import { profiles, medications, interactions, ai, Profile, ProfileWithRole, Medication, InteractionCheckResponse, APIError } from '@/lib/api'
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+import { apiFetch, profiles, medications, interactions, ai, Profile, ProfileWithRole, Medication, InteractionCheckResponse, APIError } from '@/lib/api'
 
 function stripMarkdown(text: string): string {
   return text
@@ -36,9 +34,6 @@ function SharePanel({
   userRole: string
   onClose: () => void
 }) {
-  const token = localStorage.getItem('pillara_access_token')
-  const headers = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
-
   const [tab, setTab] = useState<'invite' | 'claim' | 'members'>('members')
   const [members, setMembers] = useState<Member[]>([])
   const [loadingMembers, setLoadingMembers] = useState(true)
@@ -57,19 +52,13 @@ function SharePanel({
   const fetchMembers = useCallback(async () => {
     setLoadingMembers(true)
     try {
-      const res = await fetch(`${API_BASE}/api/v1/sharing/${profileId}/members`, { headers: { 'Authorization': `Bearer ${token}` } })
-      if (res.ok) {
-        setMembers(await res.json())
-      } else {
-        console.error('fetchMembers failed:', res.status)
-        // Keep existing members state — do not replace with empty list on error
-      }
+      setMembers(await apiFetch<Member[]>(`/api/v1/sharing/${profileId}/members`))
     } catch (err) {
-      console.error('fetchMembers network error:', err)
-      // Keep existing members state on network failure
+      console.error('fetchMembers failed:', err)
+      // Keep existing members state on error
     }
     finally { setLoadingMembers(false) }
-  }, [profileId, token])
+  }, [profileId])
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -82,17 +71,16 @@ function SharePanel({
     setInviteError('')
     setInviteMsg('')
     try {
-      const res = await fetch(`${API_BASE}/api/v1/sharing/${profileId}/invite`, {
+      await apiFetch(`/api/v1/sharing/${profileId}/invite`, {
         method: 'POST',
-        headers,
-        body: JSON.stringify({ email: inviteEmail, role: inviteRole }),
+        body: { email: inviteEmail, role: inviteRole },
       })
-      const data = await res.json()
-      if (!res.ok) { setInviteError(data.message || 'Failed to send invite'); return }
       setInviteMsg(`Invite sent to ${inviteEmail}. They have 7 days to accept.`)
       setInviteEmail('')
       fetchMembers()
-    } catch { setInviteError('Something went wrong. Please try again.') }
+    } catch (err) {
+      setInviteError(err instanceof APIError ? err.message : 'Something went wrong. Please try again.')
+    }
     finally { setInviting(false) }
   }
 
@@ -102,36 +90,26 @@ function SharePanel({
     setClaimError('')
     setClaimMsg('')
     try {
-      const res = await fetch(`${API_BASE}/api/v1/sharing/${profileId}/send-claim-invite`, {
+      await apiFetch(`/api/v1/sharing/${profileId}/send-claim-invite`, {
         method: 'POST',
-        headers,
-        body: JSON.stringify({ patient_email: claimEmail }),
+        body: { patient_email: claimEmail },
       })
-      const data = await res.json()
-      if (!res.ok) { setClaimError(data.message || 'Failed to send claim invite'); return }
       setClaimMsg(`Claim invitation sent to ${claimEmail}. They have 7 days to claim ownership.`)
       setClaimEmail('')
-    } catch { setClaimError('Something went wrong. Please try again.') }
+    } catch (err) {
+      setClaimError(err instanceof APIError ? err.message : 'Something went wrong. Please try again.')
+    }
     finally { setClaiming(false) }
   }
 
   const handleRevoke = async (targetUserId: string) => {
     if (!confirm("Revoke this person's access?")) return
     try {
-      const res = await fetch(`${API_BASE}/api/v1/sharing/${profileId}/members/${targetUserId}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` },
-      })
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}))
-        alert(data.message || 'Failed to revoke access. Please try again.')
-        console.error('handleRevoke failed:', res.status, data)
-        return
-      }
+      await apiFetch(`/api/v1/sharing/${profileId}/members/${targetUserId}`, { method: 'DELETE' })
       fetchMembers()
     } catch (err) {
-      console.error('handleRevoke network error:', err)
-      alert('Network error. Please check your connection and try again.')
+      console.error('handleRevoke failed:', err)
+      alert(err instanceof APIError ? err.message : 'Network error. Please check your connection and try again.')
     }
   }
 
@@ -345,28 +323,39 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!user) return
 
+    let cancelled = false
+
     const loadData = async () => {
       try {
-        const token = localStorage.getItem('pillara_access_token')
-        const allRes = await fetch(`${API_BASE}/api/v1/sharing/all`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        })
-        if (allRes.ok) setAllProfiles(await allRes.json())
+        const allProfilesResult = await apiFetch<ProfileWithRole[]>('/api/v1/sharing/all')
+        if (cancelled) return
+        setAllProfiles(allProfilesResult)
+        if (cancelled) return
 
         const profileList = await profiles.list()
+        if (cancelled) return
         const primaryProfile = profileList.find(p => p.is_primary) || profileList[0]
         if (primaryProfile) {
+          const medList = await medications.list(primaryProfile.id)
+          if (cancelled) return
           setProfile(primaryProfile)
-          setMeds(await medications.list(primaryProfile.id))
+          setMeds(medList)
         }
       } catch (err) {
-        console.error('Failed to load profile data:', err)
+        if (!cancelled) console.error('Failed to load profile data:', err)
       } finally {
-        setLoadingData(false)
+        if (!cancelled) setLoadingData(false)
       }
     }
 
     loadData()
+
+    // If `user` changes again before this finishes (e.g. quick logout/login),
+    // discard the stale response instead of overwriting state with the wrong
+    // user's profile/medications.
+    return () => {
+      cancelled = true
+    }
   }, [user])
 
   // Confirmation modal state for medication deletion
@@ -379,6 +368,7 @@ export default function DashboardPage() {
       setCheckResult(null)
     } catch (err) {
       console.error('Failed to delete medication:', err)
+      alert('Failed to delete medication. Please try again.')
     }
   }
 
@@ -450,11 +440,9 @@ export default function DashboardPage() {
   const handleFeedback = async (messageIndex: number, rating: 'helpful' | 'unhelpful') => {
     setFeedbackGiven(prev => ({ ...prev, [messageIndex]: rating }))
     try {
-      const token = localStorage.getItem('pillara_access_token')
-      await fetch(`${API_BASE}/api/v1/ai/feedback`, {
+      await apiFetch('/api/v1/ai/feedback', {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ conversation_id: conversationId, rating }),
+        body: { conversation_id: conversationId, rating },
       })
     } catch {
       // Feedback failure is non-critical
@@ -629,21 +617,11 @@ export default function DashboardPage() {
                 <button
                   onClick={async () => {
                     try {
-                      const token = localStorage.getItem('pillara_access_token')
-                      const res = await fetch(`${API_BASE}/api/v1/auth/resend-verification`, {
-                        method: 'POST',
-                        headers: { 'Authorization': `Bearer ${token}` },
-                      })
-                      if (!res.ok) {
-                        const data = await res.json().catch(() => ({}))
-                        alert(data.message || 'Failed to send verification email. Please try again.')
-                        console.error('resend-verification failed:', res.status)
-                      } else {
-                        alert('Verification email sent! Check your inbox.')
-                      }
+                      await apiFetch('/api/v1/auth/resend-verification', { method: 'POST' })
+                      alert('Verification email sent! Check your inbox.')
                     } catch (err) {
-                      console.error('resend-verification network error:', err)
-                      alert('Network error. Please try again.')
+                      console.error('resend-verification failed:', err)
+                      alert(err instanceof APIError ? err.message : 'Network error. Please try again.')
                     }
                   }}
                   className="text-[#F59E0B] text-xs underline hover:no-underline"

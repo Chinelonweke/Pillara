@@ -38,7 +38,12 @@ def hash_password(plain_password: str) -> str:
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     try:
         return pwd_context.verify(plain_password, hashed_password)
-    except Exception:
+    except Exception as error:
+        logger.error(
+            "verify_password_unexpected_error",
+            error=str(error),
+            error_type=type(error).__name__,
+        )
         return False
 
 
@@ -302,18 +307,20 @@ def production_safety_check() -> None:
     If it fails, the app refuses to start — loud failure beats silent vulnerability.
     """
     if settings.is_production:
-        assert not settings.DEBUG, (
-            "FATAL: DEBUG=True in production. "
-            "This exposes stack traces and internal details to attackers. "
-            "Set DEBUG=False before deploying."
-        )
-        assert len(settings.JWT_SECRET_KEY) >= 32, (
-            "FATAL: JWT_SECRET_KEY is too short for production. "
-            "Generate a strong key: python -c \"import secrets; print(secrets.token_hex(32))\""
-        )
-        assert settings.JWT_SECRET_KEY != "replace-this-with-a-real-random-64-character-string", (
-            "FATAL: JWT_SECRET_KEY is still the placeholder value. "
-            "Replace it with a real secret before deploying."
-        )
+        if settings.DEBUG:
+            raise RuntimeError(
+                "FATAL: DEBUG=True in production. "
+                "Set DEBUG=False before deploying."
+            )
+        if len(settings.JWT_SECRET_KEY) < 32:
+            raise RuntimeError(
+                "FATAL: JWT_SECRET_KEY is too short for production. "
+                "Generate a strong key: python -c 'import secrets; print(secrets.token_hex(32))'"
+            )
+        if settings.JWT_SECRET_KEY == "replace-this-with-a-real-random-64-character-string":
+            raise RuntimeError(
+                "FATAL: JWT_SECRET_KEY is still the placeholder value. "
+                "Replace it with a real secret before deploying."
+            )
 
     logger.info("production_safety_check_passed", environment=settings.ENVIRONMENT)

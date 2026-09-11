@@ -87,6 +87,16 @@ async def resolve_to_generic(drug_name: str, redis=None) -> str:
                     'tablet', 'capsule', 'syrup', 'injection', 'suspension',
                     'cream', 'ointment', 'drops', 'plus', 'extra', 'forte',
                     'junior', 'adult', 'night', 'rapid', 'extended', 'release',
+                    # Salt/ester suffixes — these resolve to a valid RxNorm rxcui
+                    # on their own (e.g. "Sodium", "Tartrate"), so without this
+                    # list the right-to-left match would identify the SALT FORM
+                    # as the drug instead of the actual active ingredient
+                    # (e.g. "Diclofenac Sodium" would resolve to "sodium").
+                    'sodium', 'potassium', 'calcium', 'magnesium', 'chloride',
+                    'hydrochloride', 'sulfate', 'sulphate', 'tartrate', 'maleate',
+                    'succinate', 'citrate', 'phosphate', 'acetate', 'mesylate',
+                    'besylate', 'fumarate', 'gluconate', 'bromide', 'dihydrate',
+                    'monohydrate', 'trihydrate', 'hydrate',
                 }
                 words = re.findall(r'[a-zA-Z]{4,}', drug_name)
                 candidate_words = [
@@ -95,7 +105,13 @@ async def resolve_to_generic(drug_name: str, redis=None) -> str:
                 ]
 
                 # Pass 1: Exact match across all candidates, right-to-left
-                # (INN typically last, manufacturer typically first)
+                # (INN typically last, manufacturer typically first).
+                # IMPORTANT: check every candidate word rather than stopping at the
+                # first hit. A name with two independently-resolving ingredient
+                # words (e.g. "Amoxicillin Cloxacillin") is a combination product —
+                # silently keeping only the first match would misidentify the drug
+                # and return confident-looking results about the wrong ingredient.
+                exact_matches = []  # [(rxcui, generic_name), ...], deduplicated by generic name
                 for word in reversed(candidate_words):
                     try:
                         r = await client.get(
@@ -106,17 +122,34 @@ async def resolve_to_generic(drug_name: str, redis=None) -> str:
                         if rxcui_list:
                             r2 = await client.get(f"{RXNORM_BASE}/rxcui/{rxcui_list[0]}/properties.json")
                             generic = r2.json().get("properties", {}).get("name", word).lower()
-                            result = (rxcui_list[0], generic)
-                            logger.info(
-                                "rxnorm_word_extraction_exact",
-                                original=drug_name,
-                                matched_word=word,
-                                generic=generic,
-                                match_type="exact",
-                            )
-                            break
+                            if generic not in {g for _, g in exact_matches}:
+                                exact_matches.append((rxcui_list[0], generic))
                     except Exception as exact_err:
                         logger.debug("rxnorm_exact_word_failed", word=word, error=str(exact_err))
+
+                if len(exact_matches) == 1:
+                    rxcui, generic = exact_matches[0]
+                    result = (rxcui, generic)
+                    logger.info(
+                        "rxnorm_word_extraction_exact",
+                        original=drug_name,
+                        generic=generic,
+                        match_type="exact",
+                    )
+                elif len(exact_matches) > 1:
+                    # Combination product — return all resolved ingredients joined,
+                    # rather than silently dropping all but one. Downstream (RAG
+                    # retrieval metadata filter) will only match a chunk tagged with
+                    # this exact combined name, which safely yields "no evidence"
+                    # instead of confidently returning info about a single ingredient.
+                    combined_generic = "/".join(sorted(g for _, g in exact_matches))
+                    result = (exact_matches[0][0], combined_generic)
+                    logger.warning(
+                        "rxnorm_combination_drug_detected",
+                        original=drug_name,
+                        ingredients=[g for _, g in exact_matches],
+                        combined_generic=combined_generic,
+                    )
 
                 # Pass 2: Fuzzy match across all candidates, right-to-left
                 # Only runs if exact match found nothing

@@ -12,7 +12,7 @@
 
 from fastapi import APIRouter, Depends, Request
 
-from api.dependencies import CurrentUser, DBSession, RedisClient, rate_limit_auth
+from api.dependencies import CurrentUser, DBSession, RedisClient, rate_limit_auth, rate_limit_api
 from core.security import decode_token
 from schemas.all_schemas import (
     LoginRequest,
@@ -304,6 +304,7 @@ async def change_password(
     current_user: CurrentUser,
     db: DBSession,
     redis: RedisClient,
+    _: None = Depends(rate_limit_api),
 ) -> SuccessResponse:
     """
     Change the authenticated user's password.
@@ -322,11 +323,18 @@ async def change_password(
         from core.exceptions import AuthenticationError
         raise AuthenticationError("Current password is incorrect.")
 
-    if len(new_password) < 8:
+    try:
+        SignupRequest.validate_password_strength(new_password)
+    except ValueError as strength_error:
         from core.exceptions import ValidationError
-        raise ValidationError("New password must be at least 8 characters.")
+        raise ValidationError(str(strength_error))
 
     current_user.hashed_password = hash_password(new_password)
+    # Null the refresh token so a stolen refresh token can't outlive a password
+    # change (mirrors the forgot-password flow in AuthService.reset_password —
+    # this endpoint was the one path that changes a password without doing this).
+    current_user.refresh_token_jti = None
+    current_user.refresh_token_expires = None
     await db.commit()
 
     # Revoke all existing sessions immediately — prevents attacker retaining
@@ -362,6 +370,7 @@ async def delete_account(
     body: dict,
     current_user: CurrentUser,
     db: DBSession,
+    _: None = Depends(rate_limit_api),
 ) -> SuccessResponse:
     """
     Permanently deletes the user account and all associated data.

@@ -29,6 +29,10 @@ async def recover_missed_reminders(ctx) -> None:
     # A reminder is "missed" if it was due more than 15 minutes ago
     # (gives the normal reminder task a window to process it first)
     missed_cutoff = now - timedelta(minutes=15)
+    # Same staleness window the main task uses for its own lock (reminder_service.py) —
+    # a fresh lock means the main task (or another recovery run) is actively sending
+    # this reminder right now, so leave it alone to avoid a duplicate send.
+    stale_lock_threshold = now - timedelta(minutes=5)
 
     async with AsyncSessionFactory() as db:
         result = await db.execute(
@@ -41,9 +45,12 @@ async def recover_missed_reminders(ctx) -> None:
                     Reminder.is_active.is_(True),
                     Reminder.next_send_at <= missed_cutoff,
                     Medication.is_active.is_(True),
+                    (Reminder.processing_locked_at.is_(None)) |
+                    (Reminder.processing_locked_at < stale_lock_threshold),
                 )
             )
             .limit(50)  # Process max 50 at a time to avoid overloading email
+            .with_for_update(of=Reminder, skip_locked=True)
         )
 
         rows = result.all()
@@ -57,6 +64,12 @@ async def recover_missed_reminders(ctx) -> None:
             count=len(rows),
         )
 
+        # Claim the lock on all of them up front, in the same transaction that
+        # holds the SKIP LOCKED row locks above — mirrors fetch_due_reminders_with_lock.
+        for reminder, _profile, _user, _medication in rows:
+            reminder.processing_locked_at = now
+        await db.flush()
+
         from services.reminder_service import ReminderService
         reminder_service = ReminderService(db)
 
@@ -66,13 +79,13 @@ async def recover_missed_reminders(ctx) -> None:
                 from services.email_service import send_reminder_email
                 await send_reminder_email(
                     to_email=user.email,
-                    patient_name=profile.name,
+                    profile_name=profile.name,
                     medication_name=medication.name,
                     dosage=medication.dosage,
                 )
 
                 # Update next_send_at so it doesn't get picked up again
-                await reminder_service.advance_next_send_at(reminder)
+                await reminder_service.mark_reminder_sent(reminder)
 
                 logger.info(
                     "reminder_recovery_sent",
@@ -86,6 +99,7 @@ async def recover_missed_reminders(ctx) -> None:
                     reminder_id=str(reminder.id),
                     error=str(error),
                 )
+                reminder.processing_locked_at = None  # release lock so it can be retried sooner
                 continue
 
         await db.commit()

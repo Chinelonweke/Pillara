@@ -2,8 +2,7 @@
 import { useState, useEffect, useCallback, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+import { apiFetch, APIError } from '@/lib/api'
 
 interface Reminder {
   id: string
@@ -66,27 +65,20 @@ function RemindersContent() {
   const [adding, setAdding] = useState(false)
   const [addError, setAddError] = useState('')
 
-  const token = typeof window !== 'undefined' ? localStorage.getItem('pillara_access_token') : null
-  const headers: Record<string, string> = {
-    'Authorization': `Bearer ${token}`,
-    'Content-Type': 'application/json'
-  }
-
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const [remRes, medRes] = await Promise.all([
-        fetch(`${API_BASE}/api/v1/reminders/?profile_id=${profileId}`, { headers }),
-        fetch(`${API_BASE}/api/v1/medications/?profile_id=${profileId}`, { headers }),
+      const [rems, meds] = await Promise.all([
+        apiFetch<Reminder[]>(`/api/v1/reminders/?profile_id=${profileId}`),
+        apiFetch<Medication[]>(`/api/v1/medications/?profile_id=${profileId}`),
       ])
-      if (remRes.ok) setReminders(await remRes.json())
-      if (medRes.ok) setMedications(await medRes.json())
+      setReminders(rems)
+      setMedications(meds)
     } catch (e) {
       console.error('Failed to load reminders:', e)
     } finally {
       setLoading(false)
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profileId])
 
     useEffect(() => {
@@ -135,10 +127,9 @@ function RemindersContent() {
       }
 
       try {
-        const res = await fetch(`${API_BASE}/api/v1/reminders/?profile_id=${profileId}`, {
+        const data = await apiFetch<Reminder>(`/api/v1/reminders/?profile_id=${profileId}`, {
           method: 'POST',
-          headers,
-          body: JSON.stringify({
+          body: {
             medication_id: selectedMedId,
             reminder_time: today.toISOString(),
             is_recurring: frequency !== 'once',
@@ -146,16 +137,11 @@ function RemindersContent() {
             notify_push: false,
             notify_email: notifyEmail,
             notify_sms: false,
-          }),
+          },
         })
-        const data = await res.json()
-        if (res.ok) {
-          created.push(data)
-        } else {
-          errors.push(`${time}: ${data.message || 'Failed'}`)
-        }
-      } catch {
-        errors.push(`${time}: Network error`)
+        created.push(data)
+      } catch (err) {
+        errors.push(`${time}: ${err instanceof APIError ? err.message : 'Network error'}`)
       }
     }
 
@@ -178,21 +164,12 @@ function RemindersContent() {
   const handleDelete = async (reminderId: string) => {
     if (!confirm('Delete this reminder?')) return
     try {
-      const res = await fetch(`${API_BASE}/api/v1/reminders/${reminderId}`, {
-        method: 'DELETE',
-        headers,
-      })
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}))
-        console.error('Failed to delete reminder:', res.status, data)
-        alert(data.message || 'Failed to delete reminder. Please try again.')
-        return
-      }
+      await apiFetch(`/api/v1/reminders/${reminderId}`, { method: 'DELETE' })
       // Only remove from UI state after server confirms deletion
       setReminders(prev => prev.filter(r => r.id !== reminderId))
     } catch (e) {
-      console.error('Failed to delete reminder — network error:', e)
-      alert('Network error. Please check your connection and try again.')
+      console.error('Failed to delete reminder:', e)
+      alert(e instanceof APIError ? e.message : 'Network error. Please check your connection and try again.')
     }
   }
 
@@ -419,7 +396,7 @@ function RemindersContent() {
                         <p className="text-[var(--muted)] text-xs mt-0.5">
                           {freqLabel}
                           {isDailyMultiple ? ` · ${timesLabel(medReminders.length)}` : ''}
-                          {notifyEmail ? ' · 📧 Email' : ''}
+                          {medReminders.some(r => r.notify_email) ? ' · 📧 Email' : ''}
                         </p>
                       </div>
                     </div>

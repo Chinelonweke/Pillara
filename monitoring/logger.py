@@ -84,6 +84,11 @@ PHI_FIELD_NAMES = frozenset({
     "allergies",
     "allergen",         # allergy_service.py cross_reactivity_detected log
     "allergens",        # allergy_service.py allergy_check_no_class_match log
+    "ingredients",      # drug_name_resolver.py rxnorm_combination_drug_detected
+    "combined_generic", # drug_name_resolver.py rxnorm_combination_drug_detected
+    "normalized",       # allergy_service.py allergy_check_drug_not_in_class_map
+    "query_preview",    # pipeline.py rag_off_topic_rejected
+    "response_preview", # interactions.py risk_level_not_found_in_response
 
     # Conversation content (may contain medical information)
     "query",

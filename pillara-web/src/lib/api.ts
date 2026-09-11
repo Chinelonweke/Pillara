@@ -41,7 +41,7 @@ export class APIError extends Error {
   }
 }
 
-async function apiFetch<T>(path: string, options: FetchOptions = {}): Promise<T> {
+export async function apiFetch<T>(path: string, options: FetchOptions = {}): Promise<T> {
   const { method = 'GET', body, auth = true } = options
 
   const headers: Record<string, string> = {

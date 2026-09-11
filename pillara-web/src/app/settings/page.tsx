@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useAuth } from '@/lib/auth-context'
-import { profiles, Profile, APIError } from '@/lib/api'
+import { apiFetch, profiles, Profile, APIError } from '@/lib/api'
 
 const COMMON_ALLERGIES = [
   'Penicillin', 'Sulfa', 'Aspirin', 'NSAIDs', 'Codeine',
@@ -51,20 +51,18 @@ export default function SettingsPage() {
     setAccountActionError('')
     setAccountActionMsg('')
     try {
-      const token = localStorage.getItem('pillara_access_token')
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/v1/auth/change-password`, {
+      await apiFetch('/api/v1/auth/change-password', {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+        body: { current_password: currentPassword, new_password: newPassword },
       })
-      const data = await res.json()
-      if (!res.ok) { setAccountActionError(data.message || 'Failed to change password.'); return }
       setAccountActionMsg('Password changed successfully.')
       setCurrentPassword('')
       setNewPassword('')
       setConfirmNewPassword('')
       setShowChangePassword(false)
-    } catch { setAccountActionError('Something went wrong. Please try again.') }
+    } catch (err) {
+      setAccountActionError(err instanceof APIError ? err.message : 'Something went wrong. Please try again.')
+    }
     finally { setAccountActionLoading(false) }
   }
 
@@ -73,17 +71,15 @@ export default function SettingsPage() {
     setAccountActionLoading(true)
     setAccountActionError('')
     try {
-      const token = localStorage.getItem('pillara_access_token')
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/v1/auth/account`, {
+      await apiFetch('/api/v1/auth/account', {
         method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: deletePassword }),
+        body: { password: deletePassword },
       })
-      const data = await res.json()
-      if (!res.ok) { setAccountActionError(data.message || 'Failed to delete account.'); return }
       localStorage.clear()
       router.push('/')
-    } catch { setAccountActionError('Something went wrong. Please try again.') }
+    } catch (err) {
+      setAccountActionError(err instanceof APIError ? err.message : 'Something went wrong. Please try again.')
+    }
     finally { setAccountActionLoading(false) }
   }
 
@@ -492,7 +488,7 @@ export default function SettingsPage() {
             </button>
           </div>
         </form>
-      </main>
+
           {/* Account */}
           <div className="rounded-xl border border-[var(--border)] overflow-hidden" style={{background: 'var(--surface)'}}>
             <div className="px-5 py-4 border-b border-[var(--border)]">
@@ -594,7 +590,7 @@ export default function SettingsPage() {
               </div>
             </div>
           </div>
-
+      </main>
     </div>
   )
 }

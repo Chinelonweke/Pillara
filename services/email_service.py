@@ -178,8 +178,12 @@ async def send_profile_invite_email(to_email: str, invite_link: str, role: str, 
         "viewer": "view medications (read only)",
     }.get(role, "access the profile")
 
+    # HTML-escape user-supplied values before interpolating into email HTML —
+    # same defence applied to send_reminder_email; these two functions were missed.
+    safe_inviter_name = html.escape(inviter_name or "")
+
     body = f"""
-        <p><strong>{inviter_name}</strong> has invited you to access a medication profile on Pillara.</p>
+        <p><strong>{safe_inviter_name}</strong> has invited you to access a medication profile on Pillara.</p>
         <p>Your role: <strong style="color:#4A9B8E;text-transform:capitalize;">{role}</strong>
         — you will be able to {role_description}.</p>
         <p>Pillara is a medication safety platform that helps caregivers and families manage
@@ -197,7 +201,7 @@ async def send_profile_invite_email(to_email: str, invite_link: str, role: str, 
                 body=body,
                 cta_text="Accept Invitation",
                 cta_url=invite_link,
-                footer_note=f"If you don't know {inviter_name} or didn't expect this, ignore this email. If the button doesn't work: {invite_link}",
+                footer_note=f"If you don't know {safe_inviter_name} or didn't expect this, ignore this email. If the button doesn't work: {invite_link}",
             ),
         })
         logger.info("profile_invite_email_sent", role=role)
@@ -211,8 +215,12 @@ async def send_profile_claim_email(to_email: str, claim_link: str, caregiver_ema
     if not settings.RESEND_API_KEY:
         return False
 
+    # HTML-escape user-supplied values before interpolating into email HTML —
+    # same defence applied to send_reminder_email; this function was missed.
+    safe_caregiver_email = html.escape(caregiver_email or "")
+
     body = f"""
-        <p><strong>{caregiver_email}</strong> has created a medication profile for you on Pillara,
+        <p><strong>{safe_caregiver_email}</strong> has created a medication profile for you on Pillara,
         a medication safety platform.</p>
         <p>You can:</p>
         <ul style="color:#374151;padding-left:20px;margin:12px 0;">
@@ -233,7 +241,7 @@ async def send_profile_claim_email(to_email: str, claim_link: str, caregiver_ema
                 body=body,
                 cta_text="Claim My Profile",
                 cta_url=claim_link,
-                footer_note=f"If you don't know {caregiver_email}, ignore this email. If the button doesn't work: {claim_link}",
+                footer_note=f"If you don't know {safe_caregiver_email}, ignore this email. If the button doesn't work: {claim_link}",
             ),
         })
         logger.info("profile_claim_email_sent")

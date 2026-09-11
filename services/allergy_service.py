@@ -393,12 +393,28 @@ async def check_allergies(
                     break
 
     except Exception as error:
-        logger.error(
-            "allergy_check_error",
+        # SAFETY-CRITICAL: allergy check failed mid-execution.
+        # We cannot return partial warnings as if the check completed successfully —
+        # doing so would look identical to "checked everything, no allergies found."
+        # Raise so the caller knows the check did not complete, and can surface
+        # an appropriate error message to the user.
+        logger.critical(
+            "allergy_check_failed_SAFETY_ALERT",
             error=str(error),
             error_type=type(error).__name__,
-            drug_names=drug_names,
+            drug_names_count=len(drug_names),  # count only — no PHI in logs
             request_id=request_id,
+            action_required=(
+                "Allergy cross-reactivity check did not complete. "
+                "User was NOT checked for all allergies. "
+                "Investigate immediately — this is a patient safety issue."
+            ),
         )
+        try:
+            import sentry_sdk
+            sentry_sdk.capture_exception(error)
+        except Exception:
+            pass
+        raise  # Do not return partial warnings — caller must handle this explicitly
 
     return warnings

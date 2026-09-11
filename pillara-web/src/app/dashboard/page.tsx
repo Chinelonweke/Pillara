@@ -58,8 +58,16 @@ function SharePanel({
     setLoadingMembers(true)
     try {
       const res = await fetch(`${API_BASE}/api/v1/sharing/${profileId}/members`, { headers: { 'Authorization': `Bearer ${token}` } })
-      if (res.ok) setMembers(await res.json())
-    } catch {}
+      if (res.ok) {
+        setMembers(await res.json())
+      } else {
+        console.error('fetchMembers failed:', res.status)
+        // Keep existing members state — do not replace with empty list on error
+      }
+    } catch (err) {
+      console.error('fetchMembers network error:', err)
+      // Keep existing members state on network failure
+    }
     finally { setLoadingMembers(false) }
   }, [profileId, token])
 
@@ -110,12 +118,21 @@ function SharePanel({
   const handleRevoke = async (targetUserId: string) => {
     if (!confirm("Revoke this person's access?")) return
     try {
-      await fetch(`${API_BASE}/api/v1/sharing/${profileId}/members/${targetUserId}`, {
+      const res = await fetch(`${API_BASE}/api/v1/sharing/${profileId}/members/${targetUserId}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` },
       })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        alert(data.message || 'Failed to revoke access. Please try again.')
+        console.error('handleRevoke failed:', res.status, data)
+        return
+      }
       fetchMembers()
-    } catch {}
+    } catch (err) {
+      console.error('handleRevoke network error:', err)
+      alert('Network error. Please check your connection and try again.')
+    }
   }
 
   const isOwner = userRole === 'owner'
@@ -611,12 +628,23 @@ export default function DashboardPage() {
                 <span className="text-[#F59E0B] text-xs">⚠️ Check your email to verify your account</span>
                 <button
                   onClick={async () => {
-                    const token = localStorage.getItem('pillara_access_token')
-                    await fetch(`${API_BASE}/api/v1/auth/resend-verification`, {
-                      method: 'POST',
-                      headers: { 'Authorization': `Bearer ${token}` },
-                    })
-                    alert('Verification email sent! Check your inbox.')
+                    try {
+                      const token = localStorage.getItem('pillara_access_token')
+                      const res = await fetch(`${API_BASE}/api/v1/auth/resend-verification`, {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${token}` },
+                      })
+                      if (!res.ok) {
+                        const data = await res.json().catch(() => ({}))
+                        alert(data.message || 'Failed to send verification email. Please try again.')
+                        console.error('resend-verification failed:', res.status)
+                      } else {
+                        alert('Verification email sent! Check your inbox.')
+                      }
+                    } catch (err) {
+                      console.error('resend-verification network error:', err)
+                      alert('Network error. Please try again.')
+                    }
                   }}
                   className="text-[#F59E0B] text-xs underline hover:no-underline"
                 >

@@ -1416,8 +1416,8 @@ Relevance Score: {chunk.final_score:.3f}
                             threshold_days=stale_threshold_days,
                             request_id=request_id,
                         )
-                except (ValueError, TypeError):
-                    pass  # If we can't parse the date, we can't check staleness
+                except (ValueError, TypeError) as date_err:
+                    logger.debug("data_freshness_date_parse_failed", error=str(date_err))  # non-blocking — staleness check skipped
 
     def _strip_thinking_chain(self, text: str) -> str:
         """Strips internal reasoning from thinking models (Qwen, DeepSeek-R1)."""

@@ -1,5 +1,6 @@
 # services/email_service.py
 
+import html
 import resend
 
 from core.config import settings
@@ -246,14 +247,22 @@ async def send_reminder_email(to_email: str, medication_name: str, dosage: str, 
     if not settings.RESEND_API_KEY:
         return False
 
+    # HTML-escape all user-supplied values before interpolating into email HTML.
+    # dosage and profile_name are free-text fields that a caregiver can set for
+    # a shared profile — without escaping, a caregiver could inject arbitrary HTML
+    # into an email sent to the patient from Pillara's legitimate domain.
+    safe_medication_name = html.escape(medication_name or "")
+    safe_dosage = html.escape(dosage or "")
+    safe_profile_name = html.escape(profile_name or "")
+
     body = f"""
         <p>This is a reminder to take your medication.</p>
         <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:16px 20px;margin:20px 0;">
             <p style="margin:0;font-size:18px;font-weight:600;color:#0F1B2D;">
-                💊 {medication_name}
+                💊 {safe_medication_name}
             </p>
-            {f'<p style="margin:8px 0 0 0;color:#6b7280;">{dosage}</p>' if dosage else ''}
-            {f'<p style="margin:8px 0 0 0;color:#6b7280;font-size:13px;">Profile: {profile_name}</p>' if profile_name else ''}
+            {f'<p style="margin:8px 0 0 0;color:#6b7280;">{safe_dosage}</p>' if safe_dosage else ''}
+            {f'<p style="margin:8px 0 0 0;color:#6b7280;font-size:13px;">Profile: {safe_profile_name}</p>' if safe_profile_name else ''}
         </div>
         <p>Please take your medication as prescribed. If you have any concerns,
         contact your doctor or pharmacist.</p>

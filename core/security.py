@@ -136,6 +136,13 @@ def sanitize_text_input(text: str, max_length: int = 2000) -> str:
     text = unicodedata.normalize("NFC", text)
     text = text.replace("\x00", "")
     text = re.sub(r'[\x01-\x08\x0b\x0c\x0e-\x1f\x7f]', '', text)
+    # Strip HTML-significant characters as defence in depth.
+    # These characters are used in HTML injection attacks. Fields like dosage and
+    # profile.name go through this function and can appear in email templates —
+    # removing < > at the input boundary prevents injection even if a template
+    # forgets to escape. html.escape() in email_service.py is the primary defence;
+    # this is the secondary layer.
+    text = text.replace("<", "").replace(">", "")
     return text.strip()
 
 

@@ -161,8 +161,16 @@ async def _send_push_notification(reminder, medication_name: str, dosage: str) -
     Web Push notification — not yet implemented.
     Requires VAPID keys and user's push subscription stored in database.
     Implement post-launch with pywebpush library.
+
+    IMPORTANT: This stub logs at WARNING (not DEBUG) so it appears in production logs.
+    Without this, patients who enable push reminders silently receive nothing
+    while the system reports the reminder as successfully sent.
     """
-    logger.debug("push_notification_stub", reminder_id=reminder.id, medication=medication_name)
+    logger.warning(
+        "push_notification_not_implemented",
+        reminder_id=str(reminder.id),
+        action_required="push reminders are not delivered — implement pywebpush post-launch",
+    )
 
 
 async def _send_sms_notification(reminder, medication_name: str) -> None:
@@ -170,5 +178,13 @@ async def _send_sms_notification(reminder, medication_name: str) -> None:
     SMS via Africa's Talking — not yet implemented.
     Best delivery channel for Nigerian users without smartphones.
     Implement post-launch with africastalking library.
+
+    IMPORTANT: This stub logs at WARNING (not DEBUG) so it appears in production logs.
+    Without this, patients who enable SMS reminders silently receive nothing
+    while the system reports the reminder as successfully sent.
     """
-    logger.debug("sms_notification_stub", reminder_id=reminder.id, medication=medication_name)
+    logger.warning(
+        "sms_notification_not_implemented",
+        reminder_id=str(reminder.id),
+        action_required="SMS reminders are not delivered — implement Africa's Talking post-launch",
+    )

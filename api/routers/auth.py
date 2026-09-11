@@ -107,7 +107,18 @@ async def logout(
     try:
         payload = decode_token(token, expected_type="access")
         jti = payload.get("jti", "")
-    except Exception:
+    except Exception as decode_error:
+        # Log if unexpected — normal InvalidTokenError is expected on expired tokens.
+        # jti="" means we cannot revoke the specific session, but we still proceed
+        # with logout (deletes refresh token from DB at minimum).
+        from core.exceptions import InvalidTokenError
+        if not isinstance(decode_error, InvalidTokenError):
+            logger.warning(
+                "logout_token_decode_failed",
+                error=str(decode_error),
+                error_type=type(decode_error).__name__,
+                note="logout proceeds but specific session JTI could not be revoked",
+            )
         jti = ""
 
     service = AuthService(db=db, redis=redis)

@@ -58,9 +58,22 @@ PHI_FIELD_NAMES = frozenset({
     "phone",
     "phone_number",
 
-    # Medical information
+    # Medical information — drug/medication names are PHI when linked to user_id.
+    # Boss review: drugs_raw, drugs_resolved, drug, brand, original, medication,
+    # matched_word, generic, resolved, word were missing — drug names appeared in
+    # plaintext logs alongside user_id, reconstructing patient medication history.
     "medication_name",
     "drug_name",
+    "medication",       # reminder_task.py reminder_sent log
+    "drug",             # drug_name_resolver rxnorm_lookup_failed
+    "brand",            # drug_name_resolver rxnorm_word_extraction logs
+    "original",         # drug_name_resolver rxnorm_word_extraction logs
+    "drugs_raw",        # pipeline.py rag_query_understood log
+    "drugs_resolved",   # pipeline.py rag_query_understood log
+    "matched_word",     # drug_name_resolver word extraction matched word
+    "generic",          # drug_name_resolver resolved generic name
+    "resolved",         # drug_name_resolver rxnorm_cache_hit resolved generic name
+    "word",             # drug_name_resolver INN word extraction candidate — drug name fragment
     "diagnosis",
     "symptoms",
     "dosage",
@@ -69,6 +82,8 @@ PHI_FIELD_NAMES = frozenset({
     "medical_history",
     "allergy",
     "allergies",
+    "allergen",         # allergy_service.py cross_reactivity_detected log
+    "allergens",        # allergy_service.py allergy_check_no_class_match log
 
     # Conversation content (may contain medical information)
     "query",

@@ -178,13 +178,21 @@ function RemindersContent() {
   const handleDelete = async (reminderId: string) => {
     if (!confirm('Delete this reminder?')) return
     try {
-      await fetch(`${API_BASE}/api/v1/reminders/${reminderId}`, {
+      const res = await fetch(`${API_BASE}/api/v1/reminders/${reminderId}`, {
         method: 'DELETE',
         headers,
       })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        console.error('Failed to delete reminder:', res.status, data)
+        alert(data.message || 'Failed to delete reminder. Please try again.')
+        return
+      }
+      // Only remove from UI state after server confirms deletion
       setReminders(prev => prev.filter(r => r.id !== reminderId))
     } catch (e) {
-      console.error('Failed to delete reminder:', e)
+      console.error('Failed to delete reminder — network error:', e)
+      alert('Network error. Please check your connection and try again.')
     }
   }
 

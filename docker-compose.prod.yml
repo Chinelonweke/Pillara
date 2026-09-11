@@ -79,3 +79,17 @@ services:
   # Override chromadb port in production — don't expose to host
   chromadb:
     ports: []
+
+  # Override prometheus port in production — must NOT be publicly accessible.
+  # Prometheus has no built-in authentication — exposing port 9090 publicly
+  # allows anyone to query /metrics, /graph, and internal service topology.
+  # Access via SSH tunnel: ssh -L 9090:localhost:9090 user@your-vps-ip
+  prometheus:
+    ports: []
+
+  # Override grafana port in production — must NOT be publicly accessible.
+  # Grafana admin login is brute-forceable and once authenticated can pivot
+  # to internal datasources. Access via SSH tunnel:
+  # ssh -L 3001:localhost:3001 user@your-vps-ip
+  grafana:
+    ports: []

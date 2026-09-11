@@ -10,10 +10,10 @@
 # while holding a lock, that lock is released but the reminder's next_send_at
 # is not updated, leaving it in a "stuck" state.
 
-import logging
 from datetime import datetime, timezone, timedelta
 
-logger = logging.getLogger(__name__)
+from monitoring.logger import get_logger
+logger = get_logger(__name__)
 
 
 async def recover_missed_reminders(ctx) -> None:

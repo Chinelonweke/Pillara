@@ -40,10 +40,12 @@ async def lifespan(app: FastAPI):
     await init_database()
     await init_redis()
 
-    try:
-        await init_chromadb_with_retry()
-    except RuntimeError as error:
-        logger.warning("chromadb_unavailable_at_startup", error=str(error))
+    # ChromaDB is required for all AI/RAG functionality.
+    # init_chromadb_with_retry() is intentionally designed to raise RuntimeError
+    # if ChromaDB never comes up (see core/database.py) — we must NOT downgrade
+    # that to a warning and continue serving traffic with AI features silently broken.
+    # Let it propagate so the process exits and is restarted by Docker/supervisor.
+    await init_chromadb_with_retry()
 
     asyncio.create_task(_keep_neondb_awake())
 

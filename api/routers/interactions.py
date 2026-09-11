@@ -2,7 +2,7 @@
 
 import json
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from api.dependencies import (
     DBSession, RedisClient, VerifiedUser,
@@ -104,12 +104,33 @@ async def check_interactions(
                 )
 
     # ── STEP 2: Deterministic allergy cross-check ──────────────────────────────
-    allergy_warnings = await check_allergies(
-        drug_names=all_drugs,
-        known_allergies_str=known_allergies,
-        redis=redis,
-        request_id=request_id,
-    )
+    # SAFETY: allergy_service.check_allergies() now raises on partial failure
+    # rather than returning incomplete results silently. We catch and surface
+    # a clear error to the user — better than falsely implying "all clear."
+    allergy_warnings = []
+    try:
+        allergy_warnings = await check_allergies(
+            drug_names=all_drugs,
+            known_allergies_str=known_allergies,
+            redis=redis,
+            request_id=request_id,
+        )
+    except Exception as allergy_error:
+        logger.critical(
+            "allergy_check_aborted_returning_error",
+            error=str(allergy_error),
+            request_id=request_id,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "allergy_check_failed",
+                "message": (
+                    "We could not complete the allergy safety check for your medications. "
+                    "Please consult your pharmacist directly before taking these medications together."
+                ),
+            },
+        )
 
     if allergy_warnings:
         logger.warning(

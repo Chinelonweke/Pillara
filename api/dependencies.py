@@ -38,7 +38,18 @@ async def get_current_user(
 
     try:
         payload = decode_token(token, expected_type="access")
-    except Exception:
+    except Exception as token_error:
+        # Log unexpected decode errors separately from expected InvalidTokenError.
+        # decode_token raises InvalidTokenError for expired/malformed JWT (expected).
+        # Any other exception here is a bug (config error, AttributeError, etc.)
+        # that would otherwise look like normal 401 traffic in logs/metrics.
+        from core.exceptions import InvalidTokenError
+        if not isinstance(token_error, InvalidTokenError):
+            logger.error(
+                "decode_token_unexpected_error",
+                error=str(token_error),
+                error_type=type(token_error).__name__,
+            )
         raise AuthenticationError("Invalid or expired token. Please sign in again.")
 
     user_id = payload.get("sub")

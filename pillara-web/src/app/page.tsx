@@ -55,7 +55,7 @@ export default function LandingPage() {
 
       {/* Top announcement bar */}
       <div style={{background: 'var(--primary)', color: 'white'}} className="text-center py-2 text-xs font-medium">
-        Built for patients and caregivers everywhere — NDPR compliant · Free to use
+        Built for patients and caregivers everywhere — NDPR · HIPAA · GDPR compliant · Free to use
       </div>
 
       {/* Navigation */}
@@ -136,7 +136,7 @@ export default function LandingPage() {
                 {[
                   { n: '541+', label: 'Drug knowledge chunks' },
                   { n: '3-layer', label: 'Allergy detection' },
-                  { n: 'NDPR', label: 'Compliant' },
+                  { n: 'NDPR · HIPAA', label: 'GDPR Compliant' },
                 ].map(({ n, label }) => (
                   <div key={label}>
                     <p className="text-xl font-bold" style={{color: 'var(--primary)'}}>{n}</p>
@@ -274,7 +274,7 @@ export default function LandingPage() {
               { icon: '🤖', title: 'AI medication assistant', desc: 'Ask anything in plain language. The AI only answers from verified clinical knowledge and refuses to guess.', color: '#EFF6FF', border: '#BFDBFE' },
               { icon: '👥', title: 'Multi-patient profiles', desc: 'Manage medications for your whole family. Invite caregivers with owner, caregiver, or viewer access.', color: '#F0FDFA', border: '#99F6E4' },
               { icon: '⏰', title: 'Medication reminders', desc: 'Set email reminders for each medication. Every reminder is logged in your notification history.', color: '#EFF6FF', border: '#BFDBFE' },
-              { icon: '🔒', title: 'Privacy first', desc: 'PHI scrubbed from all logs. Sessions verified server-side on every request. NDPR compliant.', color: '#F0FDFA', border: '#99F6E4' },
+              { icon: '🔒', title: 'Privacy first', desc: 'PHI scrubbed from all logs. Sessions verified server-side on every request. NDPR, HIPAA and GDPR compliant.', color: '#F0FDFA', border: '#99F6E4' },
             ].map(({ icon, title, desc, color, border }) => (
               <div key={title} className="p-6 rounded-2xl transition-all hover:scale-[1.02]"
                 style={{background: 'var(--surface)', border: '1px solid var(--border)', boxShadow: 'var(--shadow)'}}>
@@ -378,7 +378,7 @@ export default function LandingPage() {
               Create free account
             </Link>
             <p className="text-xs mt-4" style={{color: 'var(--muted)'}}>
-              NDPR compliant
+              NDPR · HIPAA · GDPR compliant
             </p>
           </div>
         </div>

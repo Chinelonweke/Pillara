@@ -1,41 +1,4 @@
 # services/drug_taxonomy_service.py
-#
-# WHY THIS EXISTS AS A SEPARATE SERVICE:
-# Drug class taxonomy (what class does this drug belong to?) and allergy
-# cross-sensitivity data (is this class cross-reactive with this allergy?)
-# are authoritative, structured data problems — not text retrieval problems.
-# This service provides the Layer 2/3 fallback when the local deterministic
-# map in allergy_service.py doesn't have a drug. It never replaces the local
-# map; it extends it.
-#
-# DATA SOURCES:
-# ┌─────────────────┬──────────────────────────────────────────────────────┐
-# │ Source          │ What it answers                                      │
-# ├─────────────────┼──────────────────────────────────────────────────────┤
-# │ Local map       │ Fast, offline, covers 60+ high-frequency drugs       │
-# │ RxNorm/RxClass  │ Authoritative drug→class taxonomy for ALL FDA drugs  │
-# │ MedRT           │ Explicit allergy cross-sensitivity (highest accuracy) │
-# │ FDA/ChromaDB    │ Unstructured drug text, interactions, contraindic.   │
-# └─────────────────┴──────────────────────────────────────────────────────┘
-#
-# API DETAILS:
-# Both RxNorm and MedRT are served by the NLM RxNav API — no API key needed,
-# free forever, government-maintained. MedRT data is accessed via the same
-# RxClass API using relaSource=MEDRT.
-#
-# CACHING STRATEGY:
-# Drug class membership is stable data — amoxicillin will be a penicillin
-# forever. We cache RxNorm results in Redis with no TTL (permanent cache).
-# This means each drug is looked up via network exactly once per Redis
-# instance lifetime. In production, a Redis flush or a new deployment would
-# trigger fresh lookups, which is fine.
-#
-# FAILURE HANDLING:
-# If RxNorm/MedRT is unavailable, this service returns empty lists and logs
-# the failure. The caller (allergy_service.py) degrades gracefully — the
-# local map already ran, so the most critical cases are already covered.
-# Nothing fails silently: all API failures log at WARNING with request_id.
-
 import json
 from typing import Optional
 

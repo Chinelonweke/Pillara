@@ -1,0 +1,13 @@
+# prometheus.yml
+# Prometheus scrapes /metrics from the FastAPI app every 15 seconds.
+# In production, 'app' resolves to the FastAPI container name in Docker network.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: pillara-backend
+    static_configs:
+      - targets: ['app:8000']
+    metrics_path: /metrics

@@ -55,8 +55,13 @@ coverage.xml
 *.bin
 *.gguf
 models/
+# ─── AI MODELS (LARGE FILES) ─────────────────────────────────────────────────
+# models/ intentionally NOT ignored — contains SQLAlchemy database models (Python files)
+# AI model weights live in whisper_models/ and tts_models/ instead
 whisper_models/
 tts_models/
+models/__pycache__/
+# Models are downloaded at startup or kept on the server.
 # WHY: AI model weights are gigabytes in size.
 # GitHub has a 100MB file limit.
 # Models are downloaded at startup or kept on the server.

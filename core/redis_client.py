@@ -93,8 +93,9 @@ class SessionManager:
         try:
             exists = await self.redis.exists(key)
             return bool(exists)
-        except RedisError:
-            return True  # fail open — JWT signature still provides auth
+        except RedisError as error:
+            logger.error("session_verify_redis_error", error=str(error), user_id=user_id)
+            return False  # fail closed — healthcare app must not bypass session revocation
 
     async def revoke_session(self, user_id: str, jti: str) -> bool:
         key = self._session_key(user_id, jti)
@@ -140,7 +141,8 @@ class CacheManager:
             if value is None:
                 return None
             return json.loads(value)
-        except (RedisError, json.JSONDecodeError):
+        except (RedisError, json.JSONDecodeError) as error:
+            logger.warning("cache_get_failed", namespace=namespace, error=str(error))
             return None
 
     async def set(self, namespace: str, key: str, value: Any, ttl_seconds: Optional[int] = None) -> bool:
@@ -159,7 +161,8 @@ class CacheManager:
             cache_key = self._cache_key(namespace, key)
             await self.redis.delete(cache_key)
             return True
-        except RedisError:
+        except RedisError as error:
+            logger.warning("cache_delete_failed", namespace=namespace, error=str(error))
             return False
 
 
@@ -229,7 +232,10 @@ class RateLimiter:
 
         except RedisError as error:
             logger.error("rate_limit_check_failed", error=str(error))
-            return True, 0, limit  # fail open on Redis error
+            # Fail closed — deny requests when Redis is unavailable.
+            # A Redis outage must not bypass rate limiting and allow abuse.
+            # Users will see a 429 error during the outage — acceptable trade-off.
+            return False, limit + 1, limit  # denied, over limit
 
     def make_auth_identifier(self, ip_hash: str, email: str) -> str:
         """

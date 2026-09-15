@@ -33,11 +33,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         })
         .finally(() => setLoading(false))
     } else {
-      setLoading(false)
+      setTimeout(() => setLoading(false), 0)
     }
   }, [])
 
-  const handleTokenResponse = async (tokenResponse: TokenResponse, redirectTo?: string) => {
+  const handleTokenResponse = async (tokenResponse: TokenResponse) => {
     setTokens(tokenResponse.access_token, tokenResponse.refresh_token)
     const userInfo = await auth.me()
     setUser(userInfo)

@@ -12,8 +12,7 @@
 
 from fastapi import APIRouter, Depends, Request
 
-from api.dependencies import CurrentUser, DBSession, RedisClient, rate_limit_auth
-from core.exceptions import AuthenticationError
+from api.dependencies import CurrentUser, DBSession, RedisClient, rate_limit_auth, rate_limit_api
 from core.security import decode_token
 from schemas.all_schemas import (
     LoginRequest,
@@ -108,7 +107,18 @@ async def logout(
     try:
         payload = decode_token(token, expected_type="access")
         jti = payload.get("jti", "")
-    except Exception:
+    except Exception as decode_error:
+        # Log if unexpected — normal InvalidTokenError is expected on expired tokens.
+        # jti="" means we cannot revoke the specific session, but we still proceed
+        # with logout (deletes refresh token from DB at minimum).
+        from core.exceptions import InvalidTokenError
+        if not isinstance(decode_error, InvalidTokenError):
+            logger.warning(
+                "logout_token_decode_failed",
+                error=str(decode_error),
+                error_type=type(decode_error).__name__,
+                note="logout proceeds but specific session JTI could not be revoked",
+            )
         jti = ""
 
     service = AuthService(db=db, redis=redis)
@@ -261,3 +271,174 @@ async def get_me(current_user: CurrentUser) -> dict:
         # (e.g., account settings page — add a dedicated endpoint for that).
         # Minimise PHI surface area in API responses.
     }
+
+@router.post(
+    "/resend-verification",
+    response_model=SuccessResponse,
+    summary="Resend verification email",
+)
+async def resend_verification(
+    current_user: CurrentUser,
+    db: DBSession,
+) -> SuccessResponse:
+    if current_user.is_verified:
+        return SuccessResponse(message="Your email is already verified.")
+
+    if not current_user.verification_token:
+        return SuccessResponse(message="No verification pending. Please contact support.")
+
+    from services.email_service import send_verification_email
+    await send_verification_email(
+        to_email=current_user.email,
+        verification_token=current_user.verification_token,
+    )
+    return SuccessResponse(message="Verification email sent. Please check your inbox.")
+
+@router.post(
+    "/change-password",
+    response_model=SuccessResponse,
+    summary="Change account password",
+)
+async def change_password(
+    body: dict,
+    current_user: CurrentUser,
+    db: DBSession,
+    redis: RedisClient,
+    _: None = Depends(rate_limit_api),
+) -> SuccessResponse:
+    """
+    Change the authenticated user's password.
+    Requires current password for verification.
+    Revokes all existing sessions immediately after change.
+    """
+    from core.security import verify_password, hash_password
+    current_password = body.get("current_password", "")
+    new_password = body.get("new_password", "")
+
+    if not current_password or not new_password:
+        from core.exceptions import ValidationError
+        raise ValidationError("Both current and new password are required.")
+
+    if not verify_password(current_password, current_user.hashed_password):
+        from core.exceptions import AuthenticationError
+        raise AuthenticationError("Current password is incorrect.")
+
+    try:
+        SignupRequest.validate_password_strength(new_password)
+    except ValueError as strength_error:
+        from core.exceptions import ValidationError
+        raise ValidationError(str(strength_error))
+
+    current_user.hashed_password = hash_password(new_password)
+    # Null the refresh token so a stolen refresh token can't outlive a password
+    # change (mirrors the forgot-password flow in AuthService.reset_password —
+    # this endpoint was the one path that changes a password without doing this).
+    current_user.refresh_token_jti = None
+    current_user.refresh_token_expires = None
+    await db.commit()
+
+    # Revoke all existing sessions immediately — prevents attacker retaining
+    # access on a stolen device after the real user changes their password.
+    try:
+        from core.redis_client import SessionManager
+        session_manager = SessionManager(redis)
+        revoked = await session_manager.revoke_all_sessions(user_id=str(current_user.id))
+        logger.info("sessions_revoked_after_password_change", count=revoked, user_id=str(current_user.id))
+    except Exception as revoke_error:
+        # CRITICAL — password changed in DB but sessions survived in Redis.
+        # This means an attacker with a stolen token retains access until tokens expire.
+        # Page on-call immediately. Do not swallow silently.
+        logger.critical(
+            "password_change_session_revoke_failed_SECURITY_ALERT",
+            error=str(revoke_error),
+            user_id=str(current_user.id),
+            action_required="Manually revoke Redis sessions for this user immediately",
+        )
+        # Re-raise so Sentry captures it as an unhandled exception
+        raise
+
+    logger.info("password_changed_sessions_revoked", user_id=str(current_user.id))
+    return SuccessResponse(message="Password changed successfully. Please sign in again with your new password.")
+
+
+@router.delete(
+    "/account",
+    response_model=SuccessResponse,
+    summary="Delete account — NDPR right to erasure",
+)
+async def delete_account(
+    body: dict,
+    current_user: CurrentUser,
+    db: DBSession,
+    _: None = Depends(rate_limit_api),
+) -> SuccessResponse:
+    """
+    Permanently deletes the user account and all associated data.
+    NDPR right to erasure — all personal data is removed.
+    Requires password confirmation.
+    """
+    from core.security import verify_password
+    from monitoring.audit import AuditLogger, AuditEventType
+    from sqlalchemy import text
+
+    password = body.get("password", "")
+    if not password:
+        from core.exceptions import ValidationError
+        raise ValidationError("Password confirmation is required to delete your account.")
+
+    if not verify_password(password, current_user.hashed_password):
+        from core.exceptions import AuthenticationError
+        raise AuthenticationError("Incorrect password.")
+
+    user_id = str(current_user.id)
+
+    # Log before deletion
+    from monitoring.audit import AuditOutcome
+    audit = AuditLogger(db=db)
+    await audit.log(
+        event_type=AuditEventType.ACCOUNT_DELETED,
+        user_id=user_id,
+        outcome=AuditOutcome.SUCCESS,
+    )
+    await db.commit()
+
+    # NDPR right to erasure — explicit deletion strategy:
+    #
+    # 1. Profiles this user OWNS (owner_user_id == user_id or self-created with no owner):
+    #    Delete them entirely — all their medications, reminders, and data cascade-delete.
+    #
+    # 2. Profiles this user CREATED but someone else has claimed (owner_user_id != user_id):
+    #    NULL out user_id only — the profile belongs to the patient who claimed it.
+    #    Their data is not erased. Their ownership is preserved.
+    #
+    # 3. Profiles shared WITH this user via ProfileAccess:
+    #    The DB cascade on ProfileAccess will clean these up when the user is deleted.
+
+    # Step 1: Delete profiles this user fully owns
+    await db.execute(text(
+        """
+        DELETE FROM profiles
+        WHERE (owner_user_id = :id)
+           OR (user_id = :id AND owner_user_id IS NULL)
+        """
+    ), {"id": user_id})
+
+    # Step 2: NULL out creator reference on profiles claimed by another patient
+    await db.execute(text(
+        """
+        UPDATE profiles
+        SET user_id = NULL
+        WHERE user_id = :id
+          AND owner_user_id IS NOT NULL
+          AND owner_user_id != :id
+        """
+    ), {"id": user_id})
+
+    await db.commit()
+
+    # Step 3: Delete the user — cascades remove sessions, ProfileAccess grants, audit refs
+    await db.execute(text("DELETE FROM users WHERE id = :id"), {"id": user_id})
+    await db.commit()
+
+    logger.info("account_deleted", user_id=user_id)
+    return SuccessResponse(message="Your account and all associated data have been permanently deleted.")

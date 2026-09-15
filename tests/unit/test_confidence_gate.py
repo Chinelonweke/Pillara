@@ -162,3 +162,94 @@ class TestConfidenceGateLogic:
         """Empty chunk list produces 0.0 — gate always fires on no results."""
         gate_score = self._compute_gate_score([])
         assert gate_score == 0.0
+
+# ── RRF fusion dual-hit keyword_score propagation ────────────────────────────
+
+class TestRRFFusionDualHit:
+    """
+    Regression test for the bug where a chunk returned by both vector and
+    keyword search retained keyword_score=0.0 on the merged object because
+    the fusion loop kept the vector chunk but never copied the keyword score.
+    """
+
+    def test_dual_hit_chunk_has_both_scores_populated(self):
+        """
+        A chunk appearing in both vector and keyword results must have both
+        similarity_score (from vector) and keyword_score (from keyword) > 0
+        after RRF fusion merges the two lists.
+        """
+        from ai.rag.pipeline import RAGPipeline, RetrievedChunk
+
+        # Simulate: chunk-abc returned by vector search with similarity 0.85
+        vector_chunk = RetrievedChunk(
+            chunk_id="chunk-abc",
+            text="Warfarin interacts with ibuprofen — bleeding risk.",
+            similarity_score=0.85,
+            keyword_score=0.0,   # not yet seen by keyword search
+            drug_name="warfarin",
+            section="interactions",
+        )
+
+        # Simulate: same chunk-abc returned by keyword search with keyword score 0.72
+        keyword_chunk = RetrievedChunk(
+            chunk_id="chunk-abc",
+            text="Warfarin interacts with ibuprofen — bleeding risk.",
+            similarity_score=0.0,   # keyword search does not set this
+            keyword_score=0.72,
+            drug_name="warfarin",
+            section="interactions",
+        )
+
+        # A chunk only in keyword results (no vector match)
+        keyword_only_chunk = RetrievedChunk(
+            chunk_id="chunk-xyz",
+            text="Ibuprofen is an NSAID.",
+            similarity_score=0.0,
+            keyword_score=0.55,
+            drug_name="ibuprofen",
+            section="description",
+        )
+
+        # Run RRF fusion
+        pipeline = RAGPipeline.__new__(RAGPipeline)
+        combined = pipeline._reciprocal_rank_fusion(
+            vector_results=[vector_chunk],
+            keyword_results=[keyword_chunk, keyword_only_chunk],
+            top_k=10,
+        )
+
+        # Find the dual-hit chunk in the result
+        dual_hit = next(c for c in combined if c.chunk_id == "chunk-abc")
+
+        # Both scores must be populated — this was 0.0 before the fix
+        assert dual_hit.similarity_score == 0.85, (
+            f"similarity_score should be 0.85 from vector search, got {dual_hit.similarity_score}"
+        )
+        assert dual_hit.keyword_score == 0.72, (
+            f"keyword_score should be 0.72 from keyword search, got {dual_hit.keyword_score}. "
+            f"This is the RRF dual-hit regression — keyword_score was not copied onto the merged chunk."
+        )
+
+    def test_keyword_only_chunk_has_zero_similarity_score(self):
+        """A chunk that only appeared in keyword results must have similarity_score=0.0."""
+        from ai.rag.pipeline import RAGPipeline, RetrievedChunk
+
+        keyword_only = RetrievedChunk(
+            chunk_id="chunk-kw-only",
+            text="General drug information.",
+            similarity_score=0.0,
+            keyword_score=0.65,
+            drug_name="aspirin",
+            section="description",
+        )
+
+        pipeline = RAGPipeline.__new__(RAGPipeline)
+        combined = pipeline._reciprocal_rank_fusion(
+            vector_results=[],
+            keyword_results=[keyword_only],
+            top_k=10,
+        )
+
+        result = next(c for c in combined if c.chunk_id == "chunk-kw-only")
+        assert result.similarity_score == 0.0
+        assert result.keyword_score == 0.65

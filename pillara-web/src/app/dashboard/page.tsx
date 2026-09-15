@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/lib/auth-context'
@@ -411,24 +411,37 @@ export default function DashboardPage() {
     }
   }
 
+  // Guards against a stale response winning when the user clicks another
+  // profile before the previous switch's requests have resolved.
+  const switchProfileToken = useRef<{ cancelled: boolean } | null>(null)
+
   const switchProfile = async (profileId: string) => {
+    if (switchProfileToken.current) switchProfileToken.current.cancelled = true
+    const token = { cancelled: false }
+    switchProfileToken.current = token
+
     setShowProfileSwitcher(false)
     setLoadingData(true)
     try {
       const profileList = await profiles.list()
+      if (token.cancelled) return
       const selected = profileList.find((p: Profile) => p.id === profileId)
       if (selected) {
+        const medList = await medications.list(selected.id)
+        if (token.cancelled) return
         setProfile(selected)
-        setMeds(await medications.list(selected.id))
+        setMeds(medList)
         setCheckResult(null)
         setChatMessages([])
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      console.error('Failed to switch profile:', msg)
-      alert('Failed to switch profile. Please try again.')
+      if (!token.cancelled) {
+        const msg = err instanceof Error ? err.message : String(err)
+        console.error('Failed to switch profile:', msg)
+        alert('Failed to switch profile. Please try again.')
+      }
     } finally {
-      setLoadingData(false)
+      if (!token.cancelled) setLoadingData(false)
     }
   }
 

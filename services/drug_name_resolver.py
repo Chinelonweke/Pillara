@@ -152,10 +152,22 @@ async def resolve_to_generic(drug_name: str, redis=None) -> str:
                     )
 
                 # Pass 2: Fuzzy match across all candidates, right-to-left
-                # Only runs if exact match found nothing
+                # Only runs if exact match found nothing.
+                # Each candidate word is tried independently — a timeout or
+                # malformed response on one word must not abort the rest of the
+                # sweep. Pass 1 (exact match) already has per-word isolation;
+                # this pass mirrors that pattern.
                 if not result:
                     for word in reversed(candidate_words):
-                        word_result = await rxnorm_lookup(word)
+                        try:
+                            word_result = await rxnorm_lookup(word)
+                        except Exception as fuzzy_err:
+                            logger.debug(
+                                "rxnorm_fuzzy_word_failed",
+                                word=word,
+                                error=str(fuzzy_err),
+                            )
+                            continue
                         if word_result:
                             result = word_result
                             logger.info(

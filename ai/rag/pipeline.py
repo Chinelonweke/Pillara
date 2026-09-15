@@ -1097,6 +1097,11 @@ class RAGPipeline:
 
             if chunk.chunk_id in rrf_scores:
                 existing_score, existing_chunk = rrf_scores[chunk.chunk_id]
+                
+                # Dual-hit chunk: this keyword chunk matched a chunk already seen in
+                # vector search. Copy the keyword_score onto the vector chunk so the
+                # docstring's claim ("dual-hit chunks get both scores populated") is true.
+                existing_chunk.keyword_score = chunk.keyword_score
                 rrf_scores[chunk.chunk_id] = (existing_score + rrf_score, existing_chunk)
             else:
                 rrf_scores[chunk.chunk_id] = (rrf_score, chunk)

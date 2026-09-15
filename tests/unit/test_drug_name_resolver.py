@@ -104,3 +104,89 @@ async def test_single_ingredient_brand_still_resolves_normally():
         result = await resolve_to_generic("Emzor Paracetamol")
 
     assert result == "acetaminophen"
+
+
+@pytest.mark.asyncio
+async def test_fuzzy_pass_continues_after_per_word_exception():
+    """
+    Regression test for the bug where an exception on any word in the fuzzy
+    pass (Pass 2) aborted the entire sweep — later words were never tried
+    even if they would have resolved correctly.
+
+    Pass 1 (exact match) already had per-word exception isolation.
+    Pass 2 (fuzzy) did not, causing one timeout or malformed response to
+    silently drop all remaining candidate words.
+
+    Strategy: rxnorm_lookup is a nested function inside resolve_to_generic
+    so it cannot be patched directly. Instead we patch httpx.AsyncClient to:
+    - Return empty exact-match results for all words (forcing the fuzzy pass)
+    - Raise ConnectionError on the fuzzy search for "badword"
+    - Return a valid rxcui for "paracetamol" on the fuzzy search
+
+    Word order matters: the algorithm sweeps candidate words right-to-left,
+    so "BadWord" must be the *rightmost* word (tried first) — otherwise
+    Paracetamol would resolve on the first try and BadWord would never be
+    reached, defeating the point of the test. We also match on the exact
+    "name" param (not a substring check) so the full two-word phrase
+    "Paracetamol BadWord" used in Step 1's direct lookup doesn't accidentally
+    match either branch.
+
+    Before the fix: ConnectionError on badword aborted the fuzzy loop entirely.
+    After the fix: the loop continues and resolves paracetamol correctly.
+    """
+    from unittest.mock import AsyncMock, patch, MagicMock
+    from services.drug_name_resolver import resolve_to_generic
+
+    get_call_count = {"n": 0}
+
+    async def smart_get(url, **kwargs):
+        get_call_count["n"] += 1
+        params = kwargs.get("params", {})
+        name_param = params.get("name", "").lower()
+
+        # Properties lookup after resolving rxcui — checked first, since this
+        # call passes no params and would otherwise fall into the "no search
+        # param" branch below and get treated as an exact-pass miss.
+        if "/rxcui/161/properties" in url:
+            mock = MagicMock()
+            mock.json.return_value = {"properties": {"name": "Acetaminophen"}}
+            return mock
+
+        # Exact match pass (search=0) — always return empty so fuzzy pass runs
+        if params.get("search") == 0 or "search" not in params:
+            mock = MagicMock()
+            mock.json.return_value = {"idGroup": {"rxnormId": []}}
+            return mock
+
+        # Fuzzy pass (search=1) — exact name match, not substring, so the
+        # full "paracetamol badword" phrase from Step 1 doesn't collide.
+        if name_param == "badword":
+            raise ConnectionError("Simulated timeout on badword fuzzy lookup")
+
+        if name_param == "paracetamol":
+            mock = MagicMock()
+            mock.json.return_value = {"idGroup": {"rxnormId": ["161"]}}
+            return mock
+
+        mock = MagicMock()
+        mock.json.return_value = {"idGroup": {"rxnormId": []}}
+        return mock
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+    mock_client.get = AsyncMock(side_effect=smart_get)
+
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        result = await resolve_to_generic("Paracetamol BadWord")
+
+    # The fuzzy pass must have continued past badword and resolved paracetamol
+    assert result == "acetaminophen", (
+        f"Expected acetaminophen but got {result!r}. "
+        f"The fuzzy pass likely aborted on the badword exception instead of continuing."
+    )
+    # httpx.get was called multiple times — proving the loop did not abort early
+    assert get_call_count["n"] >= 2, (
+        f"httpx.get was called only {get_call_count['n']} time(s) — "
+        f"expected multiple calls (exact pass + fuzzy pass for multiple words)"
+    )

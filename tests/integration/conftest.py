@@ -110,3 +110,7 @@ async def rag_pipeline():
 
     if redis_client:
         await redis_client.aclose()
+         # Reset the module-level Redis singleton to None so later tests in the
+        # same pytest process don't receive a closed connection.
+        import core.redis_client as _rc
+        _rc._redis_client = None

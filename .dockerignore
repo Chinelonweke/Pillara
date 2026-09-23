@@ -1,0 +1,51 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# Development
+.env
+.env.local
+*.log
+
+# Version control
+.git/
+.gitignore
+
+# Tests
+tests/
+pytest.ini
+.coverage
+htmlcov/
+
+# Frontend (built separately on Vercel)
+pillara-web/
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose.yml
+
+# Documentation
+README.md
+CHANGELOG.md
+LICENSE
+
+# Local data
+whisper_models/
+tts_models/
+/tmp/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

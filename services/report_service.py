@@ -36,10 +36,13 @@ class ReportService:
         include_inactive: bool = False,
         request_id: str = "unknown",
     ) -> ReportResponse:
-        # IDOR check: profile must belong to user_id
-        profile_result = await self.db.execute(
-            select(Profile).where(Profile.id == profile_id, Profile.user_id == user_id)
-        )
+        # Role-aware profile access — allows owners, caregivers, and viewers
+        from services.sharing_service import SharingService
+        sharing = SharingService(db=self.db)
+        role = await sharing.get_user_role_for_profile(profile_id=profile_id, user_id=user_id)
+        if not role:
+            raise ProfileNotFoundError(profile_id=profile_id)
+        profile_result = await self.db.execute(select(Profile).where(Profile.id == profile_id))
         profile = profile_result.scalar_one_or_none()
         if not profile:
             raise ProfileNotFoundError(profile_id=profile_id)
@@ -47,13 +50,13 @@ class ReportService:
         # Fetch medications (already IDOR-safe — profile is verified)
         med_query = select(Medication).where(Medication.profile_id == profile_id)
         if not include_inactive:
-            med_query = med_query.where(Medication.is_active == True)
+            med_query = med_query.where(Medication.is_active.is_(True))
         med_result = await self.db.execute(med_query)
         medications = list(med_result.scalars().all())
 
         try:
             html_content = self._render_html(profile=profile, medications=medications)
-            pdf_path = await self._generate_pdf(html_content)
+            _ = await self._generate_pdf(html_content)
         except Exception as error:
             logger.error("report_generation_failed", error=str(error), profile_id=profile_id)
             raise PDFGenerationError()

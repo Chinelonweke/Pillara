@@ -17,6 +17,7 @@
 
 from arq import cron
 from arq.connections import RedisSettings
+from workers.tasks.reminder_recovery_task import recover_missed_reminders
 
 from core.config import settings
 from monitoring.logger import configure_logging, get_logger
@@ -71,6 +72,8 @@ class WorkerSettings:
                                          40, 41, 42, 43, 44, 45, 46, 47, 48, 49,
                                          50, 51, 52, 53, 54, 55, 56, 57, 58, 59}),
         # Runs every minute (all 60 minute values)
+        cron(recover_missed_reminders, minute={0, 10, 20, 30, 40, 50}),
+        # Runs every 10 minutes — recovers reminders missed by a worker crash
     ]
 
     on_startup = startup

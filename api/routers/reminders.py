@@ -32,6 +32,10 @@ async def create_reminder(
     profile_id: str = Query(...),
 ) -> ReminderResponse:
     service = ReminderService(db=db)
+    from core.exceptions import ValidationError
+    existing = await service.list_reminders(profile_id=profile_id, user_id=current_user.id)
+    if len(existing) >= 20:
+        raise ValidationError("Maximum 20 reminders per profile. Delete some before adding more.")
     reminder = await service.create_reminder(
         profile_id=profile_id,
         user_id=current_user.id,

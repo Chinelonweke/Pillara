@@ -1,3 +1,15 @@
+# DEAD CODE WARNING
+# This file is NOT used anywhere in the codebase.
+# ChromaDB uses its own default embedding model (all-MiniLM-L6-v2 via ONNX locally).
+# The default model runs fully locally — no PHI leaves the server.
+# EMBEDDING_MODEL in core/config.py is informational only and does not change
+# what model ChromaDB actually uses.
+#
+# Post-launch: if you need to explicitly control the embedding model,
+# pass embedding_function= when calling collection.get_or_create_collection()
+# in pipeline.py:425 and in the ingestion scripts.
+# Until then, this file should be deleted or the ChromaDB default wired in explicitly.
+#
 # ai/rag/embedder.py
 #
 # Local embeddings via fastembed — no API calls, no PHI sent externally, free forever.

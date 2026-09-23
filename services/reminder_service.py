@@ -1,28 +1,11 @@
 # services/reminder_service.py
-#
-# RACE CONDITION FIX — SELECT FOR UPDATE SKIP LOCKED:
-# The ARQ worker fetches due reminders and sends notifications.
-# Without locking, two workers starting simultaneously both fetch the same reminder,
-# both send, user gets double notification.
-#
-# WITH SELECT FOR UPDATE SKIP LOCKED:
-# Worker 1 fetches reminder row and locks it.
-# Worker 2's query skips locked rows — it never sees the same reminder.
-# Zero double-sends even under parallel worker restart scenarios.
-#
-# The processing_locked_at column handles crash recovery:
-# If worker 1 crashes before finishing, its lock is held by the DB transaction.
-# When the transaction rolls back (connection lost), the lock is released.
-# processing_locked_at timestamp lets us detect stale in-progress reminders
-# that have been locked for more than 5 minutes — something went wrong.
-
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select, update
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.exceptions import NotFoundError
-from models.user import Medication, Profile, Reminder
+from models.user import Medication, Profile, ProfileAccess, Reminder
 from monitoring.audit import AuditEventType, AuditLogger, AuditOutcome
 from monitoring.logger import get_logger
 from schemas.all_schemas import ReminderCreate
@@ -37,14 +20,29 @@ class ReminderService:
         self.audit = AuditLogger(db=db)
 
     async def list_reminders(self, profile_id: str, user_id: str) -> list[Reminder]:
-        """IDOR safe: joins through Profile to verify user_id."""
+        """
+        Role-aware: allows owners, caregivers, and viewers to list reminders.
+        Access to the profile is verified at the API dependency layer.
+        Here we verify the user has some role for the profile (owner, caregiver, or viewer).
+        """
         result = await self.db.execute(
             select(Reminder)
             .join(Profile, Reminder.profile_id == Profile.id)
             .where(
-                Profile.user_id == user_id,
                 Reminder.profile_id == profile_id,
-                Reminder.is_active == True,
+                Reminder.is_active.is_(True),
+                or_(
+                    Profile.user_id == user_id,
+                    Profile.owner_user_id == user_id,
+                    Profile.id.in_(
+                        select(ProfileAccess.profile_id).where(
+                            and_(
+                                ProfileAccess.granted_to_user_id == user_id,
+                                ProfileAccess.status == "active",
+                            )
+                        )
+                    ),
+                )
             )
             .order_by(Reminder.next_send_at.asc())
         )
@@ -57,19 +55,21 @@ class ReminderService:
         reminder_data: ReminderCreate,
         request_id: str = "unknown",
     ) -> Reminder:
-        # Verify profile ownership
-        profile_result = await self.db.execute(
-            select(Profile).where(Profile.id == profile_id, Profile.user_id == user_id)
+        # Role-aware: owners and caregivers can create reminders. Viewers cannot.
+        from services.sharing_service import SharingService
+        role = await SharingService(db=self.db).get_user_role_for_profile(
+            profile_id=profile_id, user_id=user_id
         )
-        if not profile_result.scalar_one_or_none():
-            raise NotFoundError("Profile")
+        if not role or role == "viewer":
+            from core.exceptions import AuthorizationError
+            raise AuthorizationError("Viewers cannot create reminders.")
 
         # Verify medication belongs to this profile (also an IDOR check)
         med_result = await self.db.execute(
             select(Medication).where(
                 Medication.id == reminder_data.medication_id,
                 Medication.profile_id == profile_id,
-                Medication.is_active == True,
+                Medication.is_active.is_(True),
             )
         )
         if not med_result.scalar_one_or_none():
@@ -103,14 +103,39 @@ class ReminderService:
         return reminder
 
     async def delete_reminder(self, reminder_id: str, user_id: str, request_id: str = "unknown") -> None:
+        # Viewers cannot delete reminders — caregiver minimum required
+        # Fetch reminder — role-aware join checks all three access routes
         result = await self.db.execute(
             select(Reminder)
             .join(Profile, Reminder.profile_id == Profile.id)
-            .where(Reminder.id == reminder_id, Profile.user_id == user_id)
+            .where(
+                Reminder.id == reminder_id,
+                or_(
+                    Profile.user_id == user_id,
+                    Profile.owner_user_id == user_id,
+                    Profile.id.in_(
+                        select(ProfileAccess.profile_id).where(
+                            and_(
+                                ProfileAccess.granted_to_user_id == user_id,
+                                ProfileAccess.status == "active",
+                            )
+                        )
+                    ),
+                )
+            )
         )
         reminder = result.scalar_one_or_none()
         if not reminder:
             raise NotFoundError("Reminder")
+
+        # Viewers cannot delete reminders — caregiver minimum required
+        from services.sharing_service import SharingService
+        role = await SharingService(db=self.db).get_user_role_for_profile(
+            profile_id=str(reminder.profile_id), user_id=user_id
+        )
+        if not role or role == "viewer":
+            from core.exceptions import AuthorizationError
+            raise AuthorizationError("Viewers cannot delete reminders.")
 
         reminder.is_active = False
 
@@ -124,28 +149,18 @@ class ReminderService:
         )
 
     async def fetch_due_reminders_with_lock(self, batch_size: int = 10) -> list[Reminder]:
-        """
-        Fetches due reminders using SELECT FOR UPDATE SKIP LOCKED.
-
-        RACE CONDITION FIX:
-        Called by the ARQ background worker — potentially multiple worker processes.
-        SKIP LOCKED means each worker gets a different set of reminders.
-        No two workers ever process the same reminder simultaneously.
-
-        We also set processing_locked_at immediately so crash recovery works:
-        A separate monitoring query can detect reminders locked for >5 minutes
-        and alert the team that a worker may have crashed mid-send.
-        """
         now = datetime.now(tz=timezone.utc)
         stale_lock_threshold = now - timedelta(minutes=5)
 
         result = await self.db.execute(
             select(Reminder)
+            .join(Medication, Reminder.medication_id == Medication.id)
             .where(
-                Reminder.is_active == True,
+                Reminder.is_active.is_(True),
+                Medication.is_active.is_(True),  # Don't remind about discontinued/deleted medications
                 Reminder.next_send_at <= now,
                 # Either not locked, or lock is stale (worker crashed >5 min ago)
-                (Reminder.processing_locked_at == None) |
+                (Reminder.processing_locked_at.is_(None)) |
                 (Reminder.processing_locked_at < stale_lock_threshold),
             )
             .limit(batch_size)
@@ -164,19 +179,6 @@ class ReminderService:
         return reminders
 
     async def mark_reminder_sent(self, reminder: Reminder) -> None:
-        """
-        Called FIRST after a notification is sent — before any other work.
-
-        WHY UPDATE last_sent_at IMMEDIATELY:
-        If the worker crashes after sending but before calling this,
-        the next worker picks up the reminder (lock released on crash)
-        and sends again — double notification.
-
-        By writing last_sent_at as the VERY FIRST thing after sending,
-        we minimise the window for double-sends.
-        The window is now: send → crash → pick up again, but last_sent_at is already set
-        → second worker checks it and skips. Near-zero double-sends.
-        """
         now = datetime.now(tz=timezone.utc)
         reminder.last_sent_at = now
         reminder.processing_locked_at = None  # Release the lock

@@ -1,14 +1,7 @@
-# services/profile_service.py
-#
-# ALL IDOR PROTECTION LIVES HERE — not in the routes.
-# Every method that accesses a profile verifies user_id ownership.
-# The audit log is written from the service layer — not middleware, not routes.
-# This means audit events fire even if the endpoint is called from a background job.
-
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.exceptions import AuthorizationError, ProfileNotFoundError
+from core.exceptions import ProfileNotFoundError
 from models.user import Profile
 from monitoring.audit import AuditEventType, AuditLogger, AuditOutcome
 from monitoring.logger import get_logger
@@ -24,38 +17,27 @@ class ProfileService:
         self.audit = AuditLogger(db=db)
 
     async def list_profiles(self, user_id: str) -> list[Profile]:
-        """
-        IDOR safe: always filters by user_id.
-        A user can only ever see their own profiles.
-        """
         result = await self.db.execute(
             select(Profile)
             .where(Profile.user_id == user_id)
             .order_by(Profile.is_primary.desc(), Profile.created_at.asc())
-            # Primary profile first, then chronological
         )
         return list(result.scalars().all())
 
-    async def get_profile(
-        self,
-        profile_id: str,
-        user_id: str,
-        request_id: str = "unknown",
-    ) -> Profile:
+    async def get_profile(self, profile_id: str, user_id: str, request_id: str = "unknown") -> Profile:
         """
-        Fetches a profile and verifies it belongs to user_id.
-        Returns 404 whether the profile doesn't exist OR belongs to another user.
-        Never reveals to the caller which case it is.
+        Role-aware: allows owners, caregivers, and viewers to fetch a profile.
+        Checks all three access routes: user_id, owner_user_id, ProfileAccess.
         """
+        from services.sharing_service import SharingService
+        sharing = SharingService(db=self.db)
+        role = await sharing.get_user_role_for_profile(profile_id=profile_id, user_id=user_id)
+        if not role:
+            raise ProfileNotFoundError(profile_id=profile_id)
         result = await self.db.execute(
-            select(Profile).where(
-                Profile.id == profile_id,
-                Profile.user_id == user_id,
-                # Both conditions — this is the IDOR guard
-            )
+            select(Profile).where(Profile.id == profile_id)
         )
         profile = result.scalar_one_or_none()
-
         if not profile:
             raise ProfileNotFoundError(profile_id=profile_id)
 
@@ -68,27 +50,23 @@ class ProfileService:
         )
         return profile
 
-    async def create_profile(
-        self,
-        user_id: str,
-        profile_data: ProfileCreate,
-        request_id: str = "unknown",
-    ) -> Profile:
+    async def create_profile(self, user_id: str, profile_data: ProfileCreate, request_id: str = "unknown") -> Profile:
         from core.security import sanitize_text_input
 
         profile = Profile(
             user_id=user_id,
-            # user_id is set from the authenticated user — never from request body
-            # This prevents mass assignment of user_id
             name=sanitize_text_input(profile_data.name, max_length=100),
             relationship_to_user=profile_data.relationship_to_user,
-            date_of_birth=profile_data.date_of_birth,
+            date_of_birth=(
+                profile_data.date_of_birth.replace(tzinfo=__import__('datetime').timezone.utc)
+                if profile_data.date_of_birth and profile_data.date_of_birth.tzinfo is None
+                else profile_data.date_of_birth
+            ),
             gender=profile_data.gender,
             weight_kg=profile_data.weight_kg,
             known_allergies=sanitize_text_input(profile_data.known_allergies or "", max_length=500) or None,
             medical_conditions=sanitize_text_input(profile_data.medical_conditions or "", max_length=1000) or None,
             is_primary=False,
-            # New profiles are never primary — only the first "Me" profile is
         )
         self.db.add(profile)
         await self.db.flush()
@@ -104,25 +82,20 @@ class ProfileService:
         logger.info("profile_created", user_id=user_id, profile_id=profile.id)
         return profile
 
-    async def update_profile(
-        self,
-        profile_id: str,
-        user_id: str,
-        update_data: ProfileUpdate,
-        request_id: str = "unknown",
-    ) -> Profile:
+    async def update_profile(self, profile_id: str, user_id: str, update_data: ProfileUpdate, request_id: str = "unknown") -> Profile:
         from core.security import sanitize_text_input
+        from services.sharing_service import SharingService
 
-        # Fetch with ownership check
         profile = await self.get_profile(profile_id=profile_id, user_id=user_id, request_id=request_id)
-
-        # Apply updates — only fields that were explicitly provided
-        # model_dump(exclude_unset=True) returns only fields the client sent
-        # This means PATCH truly patches — untouched fields stay unchanged
+        # Viewers cannot update profile data — caregiver minimum required
+        role = await SharingService(db=self.db).get_user_role_for_profile(
+            profile_id=profile_id, user_id=user_id
+        )
+        if not role or role == "viewer":
+            from core.exceptions import AuthorizationError
+            raise AuthorizationError("Viewers cannot update profile data.")
         updates = update_data.model_dump(exclude_unset=True)
 
-        # MASS ASSIGNMENT PROTECTION: explicitly reject dangerous fields
-        # even if they somehow appear in the dict
         for forbidden_field in ("id", "user_id", "is_primary", "created_at"):
             updates.pop(forbidden_field, None)
 
@@ -131,17 +104,10 @@ class ProfileService:
                 value = sanitize_text_input(value)
             setattr(profile, field, value)
 
-        # WHY SET onboarding_completed HERE:
-        # When a user updates their profile with a real name (not the default
-        # "Me" placeholder), it signals they've completed the onboarding flow.
-        # We flip this flag on the User model so the frontend can check it via
-        # /auth/me and skip the onboarding screen on subsequent logins.
         if updates.get("name") and updates["name"].strip().lower() != "me":
             from sqlalchemy import select
             from models.user import User
-            user_result = await self.db.execute(
-                select(User).where(User.id == user_id)
-            )
+            user_result = await self.db.execute(select(User).where(User.id == user_id))
             user_obj = user_result.scalar_one_or_none()
             if user_obj and not user_obj.onboarding_completed:
                 user_obj.onboarding_completed = True
@@ -155,19 +121,20 @@ class ProfileService:
         )
         return profile
 
-    async def delete_profile(
-        self,
-        profile_id: str,
-        user_id: str,
-        request_id: str = "unknown",
-    ) -> None:
+    async def delete_profile(self, profile_id: str, user_id: str, request_id: str = "unknown") -> None:
+        from services.sharing_service import SharingService
+
         profile = await self.get_profile(profile_id=profile_id, user_id=user_id, request_id=request_id)
+        # Only owners can delete profiles
+        role = await SharingService(db=self.db).get_user_role_for_profile(
+            profile_id=profile_id, user_id=user_id
+        )
+        if role != "owner":
+            from core.exceptions import AuthorizationError
+            raise AuthorizationError("Only the profile owner can delete a profile.")
 
         if profile.is_primary:
-            raise AuthorizationError(
-                "Cannot delete your primary profile. "
-                "Create another profile first, then delete this one."
-            )
+            raise AuthorizationError("Cannot delete your primary profile. Create another profile first.")
 
         await self.db.delete(profile)
 

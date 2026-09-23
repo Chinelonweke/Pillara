@@ -14,11 +14,13 @@ export const getToken = (): string | null => {
 }
 
 export const setTokens = (accessToken: string, refreshToken: string) => {
+  if (typeof window === 'undefined') return
   localStorage.setItem('pillara_access_token', accessToken)
   localStorage.setItem('pillara_refresh_token', refreshToken)
 }
 
 export const clearTokens = () => {
+  if (typeof window === 'undefined') return
   localStorage.removeItem('pillara_access_token')
   localStorage.removeItem('pillara_refresh_token')
 }
@@ -101,6 +103,7 @@ export async function apiFetch<T>(path: string, options: FetchOptions = {}): Pro
       response.status === 401 &&
       data.error === 'authentication_required' &&
       typeof window !== 'undefined' &&
+      typeof window !== 'undefined' &&
       !window.location.pathname.includes('/login') &&
       !window.location.pathname.includes('/register')
     ) {
@@ -120,7 +123,7 @@ export async function apiFetch<T>(path: string, options: FetchOptions = {}): Pro
         if (retryRes.ok) return retryRes.json() as T
       }
       clearTokens()
-      window.location.href = '/login'
+      if (typeof window !== 'undefined') window.location.href = '/login'
       throw new APIError(401, 'authentication_required', 'Session expired. Please sign in again.')
     }
 

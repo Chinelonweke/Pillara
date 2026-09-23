@@ -1,4 +1,5 @@
 'use client'
+export const dynamic = 'force-dynamic'  // ← this line added
 import { useState, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { profiles, APIError } from '@/lib/api'

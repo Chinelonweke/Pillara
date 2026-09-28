@@ -93,7 +93,7 @@ class Settings(BaseSettings):
 
     # ── MONITORING ────────────────────────────────────────────────────────────
     SENTRY_DSN: Optional[str] = None
-    SENTRY_TRACES_SAMPLE_RATE: float = 1.0
+    SENTRY_TRACES_SAMPLE_RATE: float = 0.1
     POSTHOG_API_KEY: Optional[str] = None
 
     # ── STORAGE ───────────────────────────────────────────────────────────────
@@ -134,6 +134,11 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.ENVIRONMENT == "production"
+    
+    @property
+    def is_deployed(self) -> bool:
+        """True for any internet-facing environment (staging or production)."""
+        return self.ENVIRONMENT in ("staging", "production")
 
     @property
     def database_url_async(self) -> str:

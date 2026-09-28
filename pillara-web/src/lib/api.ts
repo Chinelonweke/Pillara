@@ -14,11 +14,13 @@ export const getToken = (): string | null => {
 }
 
 export const setTokens = (accessToken: string, refreshToken: string) => {
+  if (typeof window === 'undefined') return
   localStorage.setItem('pillara_access_token', accessToken)
   localStorage.setItem('pillara_refresh_token', refreshToken)
 }
 
 export const clearTokens = () => {
+  if (typeof window === 'undefined') return
   localStorage.removeItem('pillara_access_token')
   localStorage.removeItem('pillara_refresh_token')
 }
@@ -41,7 +43,40 @@ export class APIError extends Error {
   }
 }
 
-async function apiFetch<T>(path: string, options: FetchOptions = {}): Promise<T> {
+// Single-flight token refresh: when several requests 401 at once (e.g. a
+// Promise.all page load), they must share one /auth/refresh call. The
+// backend rotates the refresh token on use, so a second independent refresh
+// call with the now-invalidated token would fail and log the user out even
+// though the first refresh already succeeded.
+let _refreshPromise: Promise<boolean> | null = null
+
+async function _silentRefresh(): Promise<boolean> {
+  if (_refreshPromise) return _refreshPromise
+
+  _refreshPromise = (async () => {
+    const refreshToken = localStorage.getItem('pillara_refresh_token')
+    if (!refreshToken) return false
+    try {
+      const refreshRes = await fetch(`${API_BASE}/api/v1/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      })
+      if (!refreshRes.ok) return false
+      const refreshData = await refreshRes.json()
+      setTokens(refreshData.access_token, refreshData.refresh_token)
+      return true
+    } catch {
+      return false
+    } finally {
+      _refreshPromise = null
+    }
+  })()
+
+  return _refreshPromise
+}
+
+export async function apiFetch<T>(path: string, options: FetchOptions = {}): Promise<T> {
   const { method = 'GET', body, auth = true } = options
 
   const headers: Record<string, string> = {
@@ -68,38 +103,27 @@ async function apiFetch<T>(path: string, options: FetchOptions = {}): Promise<T>
       response.status === 401 &&
       data.error === 'authentication_required' &&
       typeof window !== 'undefined' &&
+      typeof window !== 'undefined' &&
       !window.location.pathname.includes('/login') &&
       !window.location.pathname.includes('/register')
     ) {
-      // Try silent token refresh before logging out
-      const refreshToken = localStorage.getItem('pillara_refresh_token')
-      if (refreshToken) {
-        try {
-          const refreshRes = await fetch(`${API_BASE}/api/v1/auth/refresh`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ refresh_token: refreshToken }),
-          })
-          if (refreshRes.ok) {
-            const refreshData = await refreshRes.json()
-            setTokens(refreshData.access_token, refreshData.refresh_token)
-            const retryHeaders: Record<string, string> = {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${refreshData.access_token}`,
-            }
-            const retryRes = await fetch(`${API_BASE}${path}`, {
-              method,
-              headers: retryHeaders,
-              body: body ? JSON.stringify(body) : undefined,
-            })
-            if (retryRes.ok) return retryRes.json() as T
-          }
-        } catch {
-          // Refresh failed — fall through to logout
+      // Try silent token refresh before logging out. Concurrent 401s share
+      // one in-flight refresh via _silentRefresh (single-flight pattern).
+      const refreshed = await _silentRefresh()
+      if (refreshed) {
+        const retryHeaders: Record<string, string> = {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${getToken()}`,
         }
+        const retryRes = await fetch(`${API_BASE}${path}`, {
+          method,
+          headers: retryHeaders,
+          body: body ? JSON.stringify(body) : undefined,
+        })
+        if (retryRes.ok) return retryRes.json() as T
       }
       clearTokens()
-      window.location.href = '/login'
+      if (typeof window !== 'undefined') window.location.href = '/login'
       throw new APIError(401, 'authentication_required', 'Session expired. Please sign in again.')
     }
 

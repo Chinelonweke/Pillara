@@ -6,7 +6,7 @@
 #    Prevents XSS if frontend ever renders output as HTML
 # 3. hash_reset_token / verify_reset_token — SHA256 token hashing for password reset
 #    We NEVER store the raw reset token in the database
-# 4. production_safety_check — asserts DEBUG=False in production at startup
+# 4. deployment_safety_check — asserts safe config in staging/production at startup
 
 import hashlib
 import html
@@ -38,7 +38,12 @@ def hash_password(plain_password: str) -> str:
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     try:
         return pwd_context.verify(plain_password, hashed_password)
-    except Exception:
+    except Exception as error:
+        logger.error(
+            "verify_password_unexpected_error",
+            error=str(error),
+            error_type=type(error).__name__,
+        )
         return False
 
 
@@ -136,6 +141,13 @@ def sanitize_text_input(text: str, max_length: int = 2000) -> str:
     text = unicodedata.normalize("NFC", text)
     text = text.replace("\x00", "")
     text = re.sub(r'[\x01-\x08\x0b\x0c\x0e-\x1f\x7f]', '', text)
+    # Strip HTML-significant characters as defence in depth.
+    # These characters are used in HTML injection attacks. Fields like dosage and
+    # profile.name go through this function and can appear in email templates —
+    # removing < > at the input boundary prevents injection even if a template
+    # forgets to escape. html.escape() in email_service.py is the primary defence;
+    # this is the secondary layer.
+    text = text.replace("<", "").replace(">", "")
     return text.strip()
 
 
@@ -271,6 +283,23 @@ def strip_llm_output_html(text: str) -> str:
 
     return text
 
+def get_client_ip(request) -> str:
+    """
+    Return the real client IP.
+    Only trusts X-Forwarded-For when the request comes directly from our own
+    proxy (Nginx). Takes the LAST entry, which Nginx appended, because earlier
+    entries are client-controlled and can be forged.
+    """
+    direct_ip = request.client.host if request.client else "unknown"
+    trusted = {ip.strip() for ip in settings.TRUSTED_PROXY_IPS.split(",")}
+
+    if direct_ip in trusted:
+        forwarded_for = request.headers.get("X-Forwarded-For")
+        if forwarded_for:
+            return forwarded_for.split(",")[-1].strip()
+
+    return direct_ip
+
 
 def hash_ip_address(ip: str) -> str:
     if not ip:
@@ -283,30 +312,33 @@ def hash_ip_address(ip: str) -> str:
 
 # ─── PRODUCTION SAFETY CHECK ──────────────────────────────────────────────────
 
-def production_safety_check() -> None:
+def deployment_safety_check() -> None:
     """
-    Called at app startup. Asserts production configuration is safe.
+    Called at app startup. Asserts any internet-facing environment
+    (staging or production) is configured safely.
 
-    SECURITY FIX: Prevents accidental production deployment with debug settings.
-    One of the most common production security failures is deploying with
-    DEBUG=True — which exposes stack traces, database queries, and internal paths.
+    Prevents deploying with DEBUG=True, which exposes stack traces,
+    database queries, and internal paths.
 
-    This check runs before the first request is ever served.
-    If it fails, the app refuses to start — loud failure beats silent vulnerability.
+    Runs before the first request is served. If it fails, the app
+    refuses to start: a loud failure beats a silent vulnerability.
     """
-    if settings.is_production:
-        assert not settings.DEBUG, (
-            "FATAL: DEBUG=True in production. "
-            "This exposes stack traces and internal details to attackers. "
-            "Set DEBUG=False before deploying."
-        )
-        assert len(settings.JWT_SECRET_KEY) >= 32, (
-            "FATAL: JWT_SECRET_KEY is too short for production. "
-            "Generate a strong key: python -c \"import secrets; print(secrets.token_hex(32))\""
-        )
-        assert settings.JWT_SECRET_KEY != "replace-this-with-a-real-random-64-character-string", (
-            "FATAL: JWT_SECRET_KEY is still the placeholder value. "
-            "Replace it with a real secret before deploying."
-        )
+    if settings.is_deployed:
+        env = settings.ENVIRONMENT
+        if settings.DEBUG:
+            raise RuntimeError(
+                f"FATAL: DEBUG=True in {env}. "
+                "Set DEBUG=False before deploying."
+            )
+        if settings.JWT_SECRET_KEY == "replace-this-with-a-real-random-64-character-string":
+            raise RuntimeError(
+                f"FATAL: JWT_SECRET_KEY is still the placeholder value in {env}. "
+                "Replace it with a real secret before deploying."
+            )
+        if len(settings.JWT_SECRET_KEY) < 64:
+            raise RuntimeError(
+                f"FATAL: JWT_SECRET_KEY is too short for {env} (need 64+ chars). "
+                "Generate one: python -c 'import secrets; print(secrets.token_hex(32))'"
+            )
 
-    logger.info("production_safety_check_passed", environment=settings.ENVIRONMENT)
+    logger.info("deployment_safety_check_passed", environment=settings.ENVIRONMENT)

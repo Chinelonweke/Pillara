@@ -141,7 +141,8 @@ class CacheManager:
             if value is None:
                 return None
             return json.loads(value)
-        except (RedisError, json.JSONDecodeError):
+        except (RedisError, json.JSONDecodeError) as error:
+            logger.warning("cache_get_failed", namespace=namespace, error=str(error))
             return None
 
     async def set(self, namespace: str, key: str, value: Any, ttl_seconds: Optional[int] = None) -> bool:
@@ -160,7 +161,8 @@ class CacheManager:
             cache_key = self._cache_key(namespace, key)
             await self.redis.delete(cache_key)
             return True
-        except RedisError:
+        except RedisError as error:
+            logger.warning("cache_delete_failed", namespace=namespace, error=str(error))
             return False
 
 

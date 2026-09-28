@@ -10,7 +10,7 @@ from core.config import settings
 from core.database import close_database, init_database, init_chromadb_with_retry
 from core.exceptions import PillaraError, RateLimitError
 from core.redis_client import close_redis, init_redis
-from core.security import production_safety_check
+from core.security import deployment_safety_check
 from monitoring.logger import configure_logging, get_logger
 from monitoring.sentry_setup import init_sentry
 
@@ -36,14 +36,16 @@ async def _keep_neondb_awake() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("pillara_starting", version=settings.APP_VERSION, environment=settings.ENVIRONMENT)
-    production_safety_check()
+    deployment_safety_check()
     await init_database()
     await init_redis()
 
-    try:
-        await init_chromadb_with_retry()
-    except RuntimeError as error:
-        logger.warning("chromadb_unavailable_at_startup", error=str(error))
+    # ChromaDB is required for all AI/RAG functionality.
+    # init_chromadb_with_retry() is intentionally designed to raise RuntimeError
+    # if ChromaDB never comes up (see core/database.py) — we must NOT downgrade
+    # that to a warning and continue serving traffic with AI features silently broken.
+    # Let it propagate so the process exits and is restarted by Docker/supervisor.
+    await init_chromadb_with_retry()
 
     asyncio.create_task(_keep_neondb_awake())
 

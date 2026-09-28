@@ -196,7 +196,7 @@ async def voice_query(
                 )
                 profile_medication_names = [m.name for m in medications if m.is_active]
             except Exception as e:
-                logger.warning("tts_fallback_failed", error=str(e))
+                logger.warning("medication_load_for_voice_query_failed", error=str(e))
 
         # Run RAG pipeline with voice formatting
         from ai.rag.pipeline import RAGPipeline

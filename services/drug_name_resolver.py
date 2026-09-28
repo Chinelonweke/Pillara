@@ -72,38 +72,113 @@ async def resolve_to_generic(drug_name: str, redis=None) -> str:
 
             # ── Step 2: Word extraction for Nigerian/African brand names ──
             # Many Nigerian brands follow: "[Manufacturer] [INN] [Dose]"
-            # e.g. "Emzor Paracetamol 500mg" → try each word → "Paracetamol" found
-            # e.g. "Amoxil 250mg" → skip "250mg" (numeric) → try "Amoxil" → found
-            # This handles brands RxNorm doesn't know by extracting the INN.
-            # No hardcoding — works for any brand following this naming convention.
+            # e.g. "Emzor Paracetamol 500mg" → INN is "Paracetamol" (second word)
+            #
+            # Algorithm (in order):
+            # 1. Try EXACT match (search=0) for each candidate word, right-to-left
+            #    (INN is typically the last meaningful word, manufacturer is first)
+            # 2. If no exact match found anywhere, try FUZZY match right-to-left
+            #    (fuzzy/search=1 can match manufacturer names to wrong drugs)
+            # This prevents a manufacturer prefix like "Emzor" from fuzzy-matching
+            # some unrelated RxNorm concept before the real INN is tried.
             if not result and len(name_lower.split()) > 1:
                 import re
-                # Extract meaningful words:
-                # - 4+ alphabetic characters only
-                # - Skip dose strings like "250mg", "400mg", "DS", "XR", "XL"
-                # - Skip manufacturer prefixes that are clearly not drug names
                 SKIP_WORDS = {
                     'tablet', 'capsule', 'syrup', 'injection', 'suspension',
                     'cream', 'ointment', 'drops', 'plus', 'extra', 'forte',
                     'junior', 'adult', 'night', 'rapid', 'extended', 'release',
+                    # Salt/ester suffixes — these resolve to a valid RxNorm rxcui
+                    # on their own (e.g. "Sodium", "Tartrate"), so without this
+                    # list the right-to-left match would identify the SALT FORM
+                    # as the drug instead of the actual active ingredient
+                    # (e.g. "Diclofenac Sodium" would resolve to "sodium").
+                    'sodium', 'potassium', 'calcium', 'magnesium', 'chloride',
+                    'hydrochloride', 'sulfate', 'sulphate', 'tartrate', 'maleate',
+                    'succinate', 'citrate', 'phosphate', 'acetate', 'mesylate',
+                    'besylate', 'fumarate', 'gluconate', 'bromide', 'dihydrate',
+                    'monohydrate', 'trihydrate', 'hydrate',
                 }
                 words = re.findall(r'[a-zA-Z]{4,}', drug_name)
-                for word in words:
-                    word_lower = word.lower()
-                    if word_lower == name_lower:
-                        continue  # Skip if same as full name
-                    if word_lower in SKIP_WORDS:
-                        continue  # Skip non-drug descriptor words
-                    word_result = await rxnorm_lookup(word)
-                    if word_result:
-                        result = word_result
-                        logger.info(
-                            "rxnorm_word_extraction",
-                            original=drug_name,
-                            matched_word=word,
-                            generic=word_result[1],
+                candidate_words = [
+                    w for w in words
+                    if w.lower() != name_lower and w.lower() not in SKIP_WORDS
+                ]
+
+                # Pass 1: Exact match across all candidates, right-to-left
+                # (INN typically last, manufacturer typically first).
+                # IMPORTANT: check every candidate word rather than stopping at the
+                # first hit. A name with two independently-resolving ingredient
+                # words (e.g. "Amoxicillin Cloxacillin") is a combination product —
+                # silently keeping only the first match would misidentify the drug
+                # and return confident-looking results about the wrong ingredient.
+                exact_matches = []  # [(rxcui, generic_name), ...], deduplicated by generic name
+                for word in reversed(candidate_words):
+                    try:
+                        r = await client.get(
+                            f"{RXNORM_BASE}/rxcui.json",
+                            params={"name": word, "search": 0}  # exact match
                         )
-                        break
+                        rxcui_list = r.json().get("idGroup", {}).get("rxnormId", [])
+                        if rxcui_list:
+                            r2 = await client.get(f"{RXNORM_BASE}/rxcui/{rxcui_list[0]}/properties.json")
+                            generic = r2.json().get("properties", {}).get("name", word).lower()
+                            if generic not in {g for _, g in exact_matches}:
+                                exact_matches.append((rxcui_list[0], generic))
+                    except Exception as exact_err:
+                        logger.debug("rxnorm_exact_word_failed", word=word, error=str(exact_err))
+
+                if len(exact_matches) == 1:
+                    rxcui, generic = exact_matches[0]
+                    result = (rxcui, generic)
+                    logger.info(
+                        "rxnorm_word_extraction_exact",
+                        original=drug_name,
+                        generic=generic,
+                        match_type="exact",
+                    )
+                elif len(exact_matches) > 1:
+                    # Combination product — return all resolved ingredients joined,
+                    # rather than silently dropping all but one. Downstream (RAG
+                    # retrieval metadata filter) will only match a chunk tagged with
+                    # this exact combined name, which safely yields "no evidence"
+                    # instead of confidently returning info about a single ingredient.
+                    combined_generic = "/".join(sorted(g for _, g in exact_matches))
+                    result = (exact_matches[0][0], combined_generic)
+                    logger.warning(
+                        "rxnorm_combination_drug_detected",
+                        original=drug_name,
+                        ingredients=[g for _, g in exact_matches],
+                        combined_generic=combined_generic,
+                    )
+
+                # Pass 2: Fuzzy match across all candidates, right-to-left
+                # Only runs if exact match found nothing.
+                # Each candidate word is tried independently — a timeout or
+                # malformed response on one word must not abort the rest of the
+                # sweep. Pass 1 (exact match) already has per-word isolation;
+                # this pass mirrors that pattern.
+                if not result:
+                    for word in reversed(candidate_words):
+                        try:
+                            word_result = await rxnorm_lookup(word)
+                        except Exception as fuzzy_err:
+                            logger.debug(
+                                "rxnorm_fuzzy_word_failed",
+                                word=word,
+                                error=str(fuzzy_err),
+                            )
+                            continue
+                        if word_result:
+                            result = word_result
+                            logger.info(
+                                "rxnorm_word_extraction_fuzzy",
+                                original=drug_name,
+                                matched_word=word,
+                                generic=word_result[1],
+                                match_type="fuzzy",
+                                warning="fuzzy_match_verify_manually",
+                            )
+                            break
 
             if not result:
                 logger.debug("rxnorm_no_match", drug=drug_name)

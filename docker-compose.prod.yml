@@ -1,28 +1,34 @@
 # docker-compose.prod.yml
-# Production overlay — run with:
-# docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# Staging/production overlay. Do NOT run by hand with plain `docker compose` —
+# use deploy.sh, which sets everything this file needs:
 #
-# This file adds the FastAPI backend and ARQ worker to the base infrastructure
-# (Redis, ChromaDB, Prometheus, Grafana) defined in docker-compose.yml.
+#   DEPLOY_ENV  staging | production   → picks .env.staging / .env.production
+#   IMAGE_TAG   git commit SHA          → which prebuilt image to run
+#
+# Adds the FastAPI backend and ARQ worker to the base infrastructure.
+#
+# SECURITY NOTES:
+# - `ports: !reset []` truly removes a port. A plain `ports: []` does NOT —
+#   Compose merges port lists, so the base ports would stay published.
+#   (`!reset` needs Docker Compose v2.24.4+; check with `docker compose version`.)
+# - The API listens on 127.0.0.1 only. Nginx is the only way in from outside.
+# - ENVIRONMENT is NOT set here — it comes from the env file / Infisical,
+#   so staging can never believe it is production.
 
 services:
 
   # ─── FASTAPI BACKEND ────────────────────────────────────────────────────────
   api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: pillara_api
-    image: pillara_api:latest
+    image: ghcr.io/chinelonweke/pillara:${IMAGE_TAG:?IMAGE_TAG must be set}
     env_file:
-      - .env.production
+      - .env.${DEPLOY_ENV:?DEPLOY_ENV must be set}
     environment:
-      - ENVIRONMENT=production
+      # In-container addresses — the same for every environment
       - CHROMA_HOST=chromadb
       - CHROMA_PORT=8000
       - REDIS_URL=redis://redis:6379/0
     ports:
-      - "8000:8000"
+      - "127.0.0.1:${API_PORT:-8000}:8000"
     depends_on:
       redis:
         condition: service_healthy
@@ -36,7 +42,7 @@ services:
       retries: 3
     restart: always
     volumes:
-      - /tmp/pillara_reports:/tmp/reports
+      - /tmp/pillara_reports_${DEPLOY_ENV}:/tmp/reports
     logging:
       driver: "json-file"
       options:
@@ -45,16 +51,11 @@ services:
 
   # ─── ARQ BACKGROUND WORKER ──────────────────────────────────────────────────
   worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: pillara_worker
-    image: pillara_api:latest
+    image: ghcr.io/chinelonweke/pillara:${IMAGE_TAG:?IMAGE_TAG must be set}
     command: ["arq", "workers.worker.WorkerSettings"]
     env_file:
-      - .env.production
+      - .env.${DEPLOY_ENV:?DEPLOY_ENV must be set}
     environment:
-      - ENVIRONMENT=production
       - CHROMA_HOST=chromadb
       - CHROMA_PORT=8000
       - REDIS_URL=redis://redis:6379/0
@@ -72,24 +73,24 @@ services:
         max-size: "20m"
         max-file: "3"
 
-  # Override redis port in production — don't expose to host
+  # ─── INFRASTRUCTURE: remove host ports ──────────────────────────────────────
+  # Redis and ChromaDB are only used by api/worker over the internal network.
   redis:
-    ports: []
+    ports: !reset []
 
-  # Override chromadb port in production — don't expose to host
   chromadb:
-    ports: []
+    ports: !reset []
 
-  # Override prometheus port in production — must NOT be publicly accessible.
-  # Prometheus has no built-in authentication — exposing port 9090 publicly
-  # allows anyone to query /metrics, /graph, and internal service topology.
-  # Access via SSH tunnel: ssh -L 9090:localhost:9090 user@your-vps-ip
-  prometheus:
-    ports: []
+  # Prometheus and Grafana keep a 127.0.0.1-only port (from the base file) so
+  # you can reach them through an SSH tunnel. They are never public.
+  #   ssh -L 3001:localhost:3001 deploy@<vps-ip>   → http://localhost:3001
 
-  # Override grafana port in production — must NOT be publicly accessible.
-  # Grafana admin login is brute-forceable and once authenticated can pivot
-  # to internal datasources. Access via SSH tunnel:
-  # ssh -L 3001:localhost:3001 user@your-vps-ip
-  grafana:
-    ports: []
+# ─── NETWORK ──────────────────────────────────────────────────────────────────
+# Fixed subnet so the gateway IP is predictable. Nginx on the host reaches the
+# API through this gateway, so TRUSTED_PROXY_IPS must include it:
+#   default subnet 172.30.0.0/24  →  TRUSTED_PROXY_IPS=127.0.0.1,172.30.0.1
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${DOCKER_SUBNET:-172.30.0.0/24}

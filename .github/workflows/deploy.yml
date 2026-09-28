@@ -1,0 +1,116 @@
+# .github/workflows/deploy.yml
+#
+# push to staging → CI → build image → deploy to STAGING server
+# push to main    → CI → build image → deploy to PRODUCTION server
+#
+# The image is built ONCE here and pushed to GitHub Container Registry (GHCR).
+# The server only pulls it — it never builds PyTorch itself.
+#
+# Each target is a GitHub Environment (Settings → Environments) with its own:
+#   Secrets:   VPS_HOST, VPS_USER, VPS_SSH_KEY
+#   Variables: APP_DIR  (e.g. /opt/pillara)
+#              API_URL  (https://api-staging.pillara.site or https://api.pillara.site)
+# A staging deploy can therefore never use production's server or keys.
+
+name: Deploy
+
+on:
+  push:
+    branches: [staging, main]
+  workflow_dispatch:   # manual redeploy of the current branch
+
+# Never run two deploys to the same environment at once; queue them instead.
+concurrency:
+  group: deploy-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/chinelonweke/pillara   # GHCR names must be lowercase
+  DEPLOY_ENV: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+
+jobs:
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    name: Build & push image
+    needs: ci
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ env.IMAGE }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy to ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+    needs: build
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+    timeout-minutes: 25
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ github.sha }}
+          DEPLOY_ENV: ${{ env.DEPLOY_ENV }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          envs: GHCR_USER,GHCR_TOKEN,SHA,DEPLOY_ENV
+          command_timeout: 20m
+          script: |
+            set -e
+            cd "${{ vars.APP_DIR }}"
+
+            # Log in to GHCR with a token that expires when this job ends
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+
+            # Check out the exact commit being deployed, so compose files,
+            # nginx.conf and scripts match the image.
+            git fetch --quiet origin
+            git checkout --quiet --detach "$SHA"
+
+            bash deploy.sh "$DEPLOY_ENV" "$SHA"
+
+            docker logout ghcr.io
+
+      - name: Public health check
+        run: |
+          echo "Checking ${{ vars.API_URL }}/health"
+          for i in $(seq 1 10); do
+            if curl -sf "${{ vars.API_URL }}/health"; then
+              echo ""
+              echo "✅ ${{ vars.API_URL }} is healthy"
+              exit 0
+            fi
+            sleep 6
+          done
+          echo "❌ ${{ vars.API_URL }}/health not reachable from the internet"
+          echo "   (container is healthy on the server — check Nginx, SSL or DNS)"
+          exit 1

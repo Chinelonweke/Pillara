@@ -1,15 +1,22 @@
 # docker-compose.yml
-# Development: only infrastructure runs in Docker (Redis, ChromaDB)
-# Production: everything including FastAPI runs in Docker
+# Development: only infrastructure runs in Docker (Redis, ChromaDB, Prometheus, Grafana)
+# Production/staging: add docker-compose.prod.yml on top (see that file)
+#
+# SECURITY: every port is bound to 127.0.0.1 (this machine only).
+# "6380:6379" would listen on ALL interfaces — on a server that means the
+# public internet, and Docker bypasses the UFW firewall.
+#
+# No container_name / fixed network name: Compose names things per project
+# (e.g. pillara-production-redis-1), so staging and production can never
+# share containers or a network.
 
 services:
 
   # ─── REDIS ──────────────────────────────────────────────────────────────────
   redis:
     image: redis:7.4-alpine
-    container_name: pillara_redis
     ports:
-      - "6380:6379"
+      - "127.0.0.1:6380:6379"
     command: >
       redis-server
       --appendonly yes
@@ -28,9 +35,8 @@ services:
   # ─── CHROMADB ───────────────────────────────────────────────────────────────
   chromadb:
     image: chromadb/chroma:0.5.20
-    container_name: pillara_chromadb
     ports:
-      - "8001:8000"
+      - "127.0.0.1:8001:8000"
     volumes:
       - chromadb_data:/chroma/chroma
     environment:
@@ -46,13 +52,12 @@ services:
 
   # ─── PROMETHEUS ─────────────────────────────────────────────────────────────
   prometheus:
-    image: prom/prometheus:latest
-    container_name: pillara_prometheus
+    image: prom/prometheus:latest   # TODO: pin a version
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus_data:/prometheus
     ports:
-      - "9090:9090"
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
@@ -61,14 +66,13 @@ services:
 
   # ─── GRAFANA ────────────────────────────────────────────────────────────────
   grafana:
-    image: grafana/grafana:latest
-    container_name: pillara_grafana
+    image: grafana/grafana:latest   # TODO: pin a version
     volumes:
       - grafana_data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning
       - ./grafana/dashboards:/etc/grafana/dashboards
     ports:
-      - "3001:3000"
+      - "127.0.0.1:${GRAFANA_PORT:-3001}:3000"
     environment:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:?GRAFANA_PASSWORD must be set}
@@ -80,14 +84,6 @@ services:
 
 volumes:
   redis_data:
-    driver: local
   chromadb_data:
-    driver: local
   prometheus_data:
-    driver: local
   grafana_data:
-    driver: local
-
-networks:
-  default:
-    name: pillara_network

@@ -1,29 +1,75 @@
+# .github/workflows/reseed.yml
+#
+# Weekly refresh of the drug knowledge base (FDA + RxNorm + drug classes).
+# REPLACES the old drug_data_pipeline.yml and reseed.yml.
+#
+# WHY IT RUNS ON THE SERVER:
+# ChromaDB has no public port — by design it is only reachable from inside the
+# server. So instead of connecting from GitHub's runner, we SSH in and run the
+# seed scripts inside the running api container, which can reach ChromaDB.
+#
+# Uses the same GitHub Environments as deploy.yml (VPS_HOST, VPS_USER,
+# VPS_SSH_KEY, APP_DIR).
+
 name: Weekly Drug Knowledge Reseed
 
 on:
   schedule:
-    - cron: '0 3 * * 0'  # Every Sunday at 03:00 UTC (staggered from drug_data_pipeline at 02:00)
-  workflow_dispatch:       # Allow manual trigger from GitHub Actions UI
+    - cron: '0 2 * * 0'   # Sundays 02:00 UTC, production only
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Which environment to reseed'
+        required: true
+        default: 'production'
+        type: choice
+        options: [production, staging]
+      dry_run:
+        description: 'Dry run for drug classes (preview, no writes; skips FDA seed)'
+        required: false
+        default: 'false'
+        type: choice
+        options: ['false', 'true']
+
+# Share the deploy lock so a reseed never runs in the middle of a deploy.
+concurrency:
+  group: deploy-${{ (inputs.target || 'production') == 'production' && 'main' || 'staging' }}
+  cancel-in-progress: false
 
 jobs:
   reseed:
-    name: Reseed ChromaDB from FDA and RxNorm
+    name: Reseed ${{ inputs.target || 'production' }}
     runs-on: ubuntu-latest
-
+    environment: ${{ inputs.target || 'production' }}
+    timeout-minutes: 45
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: SSH into production server and reseed
-        uses: appleboy/ssh-action@v1.0.0
+      - name: Run seed scripts on the server
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          DEPLOY_ENV: ${{ inputs.target || 'production' }}
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
         with:
           host: ${{ secrets.VPS_HOST }}
-          username: root
+          username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
-          timeout: 600s
+          envs: DEPLOY_ENV,DRY_RUN
+          command_timeout: 40m
           script: |
-            cd /opt/pillara
-            echo "Starting drug knowledge reseed..."
-            docker compose exec -T app python scripts/seed_drug_data.py
-            docker compose exec -T app python scripts/seed_drug_classes.py
-            echo "Reseed complete"
+            set -e
+            cd "${{ vars.APP_DIR }}"
+
+            # The compose files need these to resolve ${IMAGE_TAG}/${DEPLOY_ENV}
+            export DEPLOY_ENV
+            export IMAGE_TAG="$(cat ".deployed_tag.$DEPLOY_ENV")"
+            COMPOSE="docker compose -p pillara-$DEPLOY_ENV --env-file .env.$DEPLOY_ENV -f docker-compose.yml -f docker-compose.prod.yml"
+
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "DRY RUN — previewing drug classes only, nothing written"
+              $COMPOSE exec -T api python scripts/seed_drug_classes.py --dry-run
+            else
+              echo "→ Seeding FDA / RxNorm drug data..."
+              $COMPOSE exec -T api python scripts/seed_drug_data.py
+              echo "→ Seeding drug classes..."
+              $COMPOSE exec -T api python scripts/seed_drug_classes.py
+              echo "✅ Reseed complete"
+            fi

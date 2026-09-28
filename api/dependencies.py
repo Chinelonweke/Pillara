@@ -1,7 +1,7 @@
 # api/dependencies.py
 from typing import Annotated, Optional
 
-from fastapi import Depends, Header, Query, Request
+from fastapi import Depends, Query, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -154,7 +154,6 @@ async def rate_limit_api(
 async def rate_limit_auth(
     request: Request,
     redis: Redis = Depends(get_redis),
-    x_forwarded_for: Optional[str] = Header(None),
 ) -> None:
     """
     Separate per-IP and per-email rate limits for auth endpoints.
@@ -163,27 +162,11 @@ async def rate_limit_auth(
     - Brute force from one IP against many accounts (per-IP limit)
     - Credential stuffing from many IPs against one account (per-email limit)
 
-    Only trust X-Forwarded-For from configured trusted proxies to prevent
-    IP spoofing via header injection.
+    Client IP comes from get_client_ip(), which only trusts X-Forwarded-For
+    from configured proxies and takes the proxy-appended (last) entry.
     """
-    # Only trust X-Forwarded-For if it comes through a configured proxy
-    # (Nginx sets this in production). In development, use client IP directly.
-    trusted_proxy = getattr(settings, 'TRUSTED_PROXY_IPS', None)
-    client_ip = request.client.host if request.client else "unknown"
-
-    # Only trust X-Forwarded-For when the request comes from a configured trusted proxy.
-    # IMPORTANT: if trusted_proxy is empty/unset, we do NOT trust the header —
-    # fail closed (use client IP directly) to prevent IP spoofing.
-    # Old logic (not trusted_proxy OR client_ip in list) was backwards:
-    # an unset TRUSTED_PROXY_IPS would mean "trust everyone" — the opposite of safe.
-    trusted_ips = [ip.strip() for ip in trusted_proxy.split(",")] if trusted_proxy else []
-    if x_forwarded_for and client_ip in trusted_ips:
-        raw_ip = x_forwarded_for.split(",")[0].strip()
-    else:
-        raw_ip = client_ip
-
-    from core.security import hash_ip_address
-    ip_hash = hash_ip_address(raw_ip)
+    from core.security import get_client_ip, hash_ip_address
+    ip_hash = hash_ip_address(get_client_ip(request))
 
     try:
         body = await request.json()
@@ -192,7 +175,7 @@ async def rate_limit_auth(
         email = "unknown"
 
     limiter = RateLimiter(redis)
-
+    
     # Check per-IP rate limit
     ip_allowed, _, _ = await limiter.check_rate_limit(
         identifier=f"ip:{ip_hash}",

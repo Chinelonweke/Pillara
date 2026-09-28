@@ -38,7 +38,12 @@ def load_secrets_from_infisical() -> None:
     client_id = os.getenv("INFISICAL_CLIENT_ID")
     client_secret = os.getenv("INFISICAL_CLIENT_SECRET")
     project_id = os.getenv("INFISICAL_PROJECT_ID")
-    infisical_environment = os.getenv("INFISICAL_ENVIRONMENT", "dev")
+    infisical_environment = os.getenv("INFISICAL_ENVIRONMENT")
+    if not infisical_environment:
+        raise RuntimeError(
+            "USE_INFISICAL=true but INFISICAL_ENVIRONMENT is not set. "
+            "Set it to dev, staging, or prod in your .env file."
+    )
     site_url = os.getenv("INFISICAL_SITE_URL", "https://app.infisical.com")
 
     if not all([client_id, client_secret, project_id]):

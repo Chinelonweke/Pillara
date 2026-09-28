@@ -8,7 +8,7 @@ from starlette.responses import Response
 
 import structlog
 
-from core.security import hash_ip_address
+from core.security import get_client_ip, hash_ip_address
 from monitoring.logger import RequestLogger, get_logger
 
 logger = get_logger(__name__)
@@ -19,12 +19,8 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
         request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
 
-        forwarded_for = request.headers.get("X-Forwarded-For")
-        raw_ip = forwarded_for.split(",")[0].strip() if forwarded_for else (
-            request.client.host if request.client else "unknown"
-        )
+        raw_ip = get_client_ip(request)
         ip_hash = hash_ip_address(raw_ip)
-
         structlog.contextvars.clear_contextvars()
         structlog.contextvars.bind_contextvars(request_id=request_id, ip_hash=ip_hash)
 
@@ -58,7 +54,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-XSS-Protection"] = "1; mode=block"
 
         from core.config import settings
-        if settings.is_production:
+        if settings.is_deployed:
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
 
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"

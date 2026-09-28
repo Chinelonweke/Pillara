@@ -30,8 +30,8 @@ class Base(DeclarativeBase):
 def _create_engine() -> AsyncEngine:
     # Build connect_args — SSL in production
     connect_args = {}
-    if settings.is_production:
-        # Enforce SSL in production — data in transit must be encrypted
+    if settings.is_deployed:
+        
         # NeonDB and most managed PostgreSQL providers require this
         connect_args["ssl"] = "require"
 
